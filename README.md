@@ -87,8 +87,19 @@ swift run tmsctl      # diagnostics CLI, see below
 
 ### 3. Grant permissions
 
-On first launch the app explains what it needs and links straight to the right settings
-pane. See [Permissions](#permissions).
+On first launch a setup window walks through it: allow Accessibility, connect Spotify,
+confirm Teams is running. Each step verifies itself — the Spotify step turns green only
+after it has actually read what is playing, and shows you the status it will set.
+
+### Uninstalling
+
+```sh
+./scripts/uninstall.sh
+```
+
+Removes the app, its preferences, the Spotify tokens in the Keychain, both permission
+grants, the login item and its caches. Use `--keep-app` to reset everything *except* the
+bundle, which is how you test the first-run experience again.
 
 ### Signing
 
@@ -155,10 +166,13 @@ Both implement the same `PresenceSource` interface, so switching is a menu choic
 
 ## How it behaves
 
+* **Updates within a few seconds of a track change.** Measured end to end on the
+  development Mac: skip a track, Teams shows the new one in **4–5 seconds**.
 * **Updates only when the rendered status actually changes.** Progress ticks, the same
   track looping, and repeated polls do not touch Teams.
-* **Debounces changes** (5s by default), so skipping through tracks produces one Teams
-  edit rather than ten.
+* **Rate-limits rather than delays.** The first change after a quiet period is published
+  immediately; only a second change arriving within a few seconds waits. Skipping through
+  ten tracks still produces one or two Teams edits, not ten.
 * **Pausing does not immediately clear your status.** After a grace period (5 minutes by
   default) your previous status is restored. Resuming sooner changes nothing.
 * **Restores your original status** when you turn syncing off — but only if Teams still
@@ -220,8 +234,9 @@ the core.
   than misbehave.
 * **Teams updates can break it.** The self-test runs whenever the Teams version changes
   and disables automation with a clear message instead of thrashing.
-* **The Teams profile flyout is briefly visible** during an update (~2–4 seconds). If
-  Teams is on a second monitor you will see it.
+* **The Teams profile flyout is briefly visible** during an update (~3 seconds). If Teams
+  is on a second monitor you will see it open and close. It is not brought to the front,
+  and it never takes keyboard focus.
 * **Not notarized.** You will need to build it yourself for now.
 
 ---

@@ -167,9 +167,12 @@ Order of evaluation:
    was empty".
 2. **Not playing.** Start the idle clock. Inside the grace period, do nothing at all —
    resuming causes no churn. Past it, restore the user's original status (or clear it).
-3. **Playing.** If the rendered text equals what we last wrote, do nothing. Otherwise it
-   becomes a candidate and must stay unchanged for the debounce window before it is
-   written.
+3. **Playing.** If the rendered text equals what we last wrote, do nothing. Otherwise
+   publish it — *immediately*, if no write happened in the last few seconds. Only a
+   second change arriving inside that window is held back, and then only the newest
+   candidate survives. This is a leading-edge rate limit, not a trailing-edge debounce:
+   the earlier trailing behaviour made every change wait out the window on top of the
+   poll interval, which felt like the app simply was not working.
 
 `PresenceCoordinator` is the I/O shell: polling, threading, error classification, and
 Teams launch/quit observation via `NSWorkspace`. Teams automation is blocking, so it runs
@@ -225,6 +228,40 @@ one-sentence explanation, and a severity that drives the icon. There is no gener
 case: if the app cannot say what is wrong, that is a bug.
 
 ---
+
+## Cost of driving the Teams UI
+
+Worth knowing before changing anything in `TeamsAXTarget`, because the obvious-looking
+code is slow in a non-obvious way.
+
+**A full search of the Teams accessibility tree costs ~650 ms.** The tree is ~4300 nodes
+and each one needs an IPC round trip for its children plus two or three more for the
+predicate. Three rules follow:
+
+* **Searching for an element that is absent is the worst case**, because it walks
+  everything. The old "is the flyout open?" check asked for three absent elements before
+  doing anything — two seconds of pure waste per update.
+* **Wait conditions are evaluated repeatedly**, so an expensive condition multiplies. One
+  condition performed two full walks per poll.
+* **Scope and cap.** Once the flyout is open, everything the editor needs lives inside
+  the dialog, so searches are scoped to that subtree. The dialog itself sits at depth 12,
+  so searches for it are depth-capped, pruning the chat and calendar subtrees entirely.
+
+`AXPress` never worked on any Teams build tested, so it is probed for only 0.6 s and then
+abandoned for the session after four consecutive no-ops. It used to cost ~5 s per control.
+
+Measured phases for one status update: openFlyout ~1.05 s, openEditor ~0.95 s,
+replaceText ~0.12 s, commit ~1.12 s — about 3.5 s in total, down from 23 s, and most of
+what remains is Teams' own rendering. Set `TMS_DEBUG=1` to log these.
+
+### One lock for the whole Teams UI
+
+`TeamsUI` is a process-wide recursive lock, and every operation that drives the flyout
+takes it. This is not defensive: `TeamsAXTarget` and `TeamsSelfTest` are separate objects
+that were observed running concurrently, one opening the flyout while the other pressed
+Escape, with both then reporting that the control did not respond. The self-test uses
+`tryExclusive` and skips rather than queues — a self-test that waits behind a write is
+pointless, because the write already proves the selectors resolve.
 
 ## Threading
 
