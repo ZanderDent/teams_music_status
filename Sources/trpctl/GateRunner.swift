@@ -125,15 +125,13 @@ struct GateRunner {
                 _ = AXPoll.wait(timeout: 40) { !TeamsProcesses.isRunning }
             }
             target.handleTeamsRestart()
-            if let url = TeamsProcesses.applicationURL() {
-                let configuration = NSWorkspace.OpenConfiguration()
-                configuration.activates = false
-                let semaphore = DispatchSemaphore(value: 0)
-                NSWorkspace.shared.openApplication(at: url, configuration: configuration) { _, _ in
-                    semaphore.signal()
-                }
-                _ = semaphore.wait(timeout: .now() + 30)
-            }
+            // `open -g` is the reliable way to relaunch without activating; NSWorkspace's
+            // openApplication did not consistently start a terminated Teams here.
+            let launch = Process()
+            launch.executableURL = URL(fileURLWithPath: "/usr/bin/open")
+            launch.arguments = ["-g", "-b", TeamsProcesses.bundleIdentifier]
+            try? launch.run()
+            launch.waitUntilExit()
             _ = AXPoll.wait(timeout: 90) { TeamsProcesses.isRunning }
             print("   Teams relaunched; waiting for it to settle…")
             _ = AXPoll.wait(timeout: 60) { !TeamsProcesses.webViewHelperPIDs().isEmpty }

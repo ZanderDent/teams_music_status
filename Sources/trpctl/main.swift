@@ -17,6 +17,10 @@ import TeamsRichPresenceCore
 //   trpctl spotify             read the currently-playing track from the chosen source
 //   trpctl version             installed Teams version
 
+// Long acceptance runs are watched from a file; block buffering would hide all
+// progress until exit.
+setvbuf(stdout, nil, _IOLBF, 0)
+
 func frontmostAppName() -> String {
     NSWorkspace.shared.frontmostApplication?.localizedName ?? "?"
 }

@@ -132,7 +132,7 @@ public final class TeamsAccessibility {
     /// Never activates Teams. Every repair path here — reopening a closed window,
     /// un-minimizing, and materializing the tree — was verified in Phase 0 to leave the
     /// user's frontmost application untouched.
-    public func ensureHealthy(timeout: TimeInterval = 45) throws {
+    public func ensureHealthy(timeout: TimeInterval = 90) throws {
         let started = Date()
         var attempts = 0
 
@@ -231,10 +231,28 @@ public final class TeamsAccessibility {
         Log.debug(Log.accessibility, "touching \(helpers.count) WebView helper process(es)")
         for helperPID in helpers {
             let element = AXElement(pid: helperPID)
+
+            // The exact shape of the contact matters, and this mirrors the sequence proven
+            // in Phase 0. Counting children alone is NOT enough: what appears to satisfy
+            // Chromium's assistive-technology detection is a walk that *reads attributes*
+            // off each node. So request the attribute list, then walk reading AXRole —
+            // and do not cap the walk so tightly that it stops before reaching real nodes.
             var names: CFArray?
             AXUIElementCopyAttributeNames(element.raw, &names)
-            _ = element.descendantCount(maxDepth: 10, limit: 4_000)
+            readRolesDeeply(element, depth: 0, maxDepth: 12)
+
+            // Expected to fail (attributeUnsupported / cannotComplete). Retained because
+            // the detection keys off the request being made, not off its result.
             element.setAttribute("AXManualAccessibility", kCFBooleanTrue)
+        }
+    }
+
+    /// Walk a helper's tree reading `AXRole` at every node.
+    private func readRolesDeeply(_ element: AXElement, depth: Int, maxDepth: Int) {
+        guard depth <= maxDepth else { return }
+        _ = element.role
+        for child in element.children {
+            readRolesDeeply(child, depth: depth + 1, maxDepth: maxDepth)
         }
     }
 
@@ -283,6 +301,12 @@ public final class TeamsAccessibility {
         observerLock.unlock()
 
         startObserverRunLoop(for: created)
+        // The helper contact that follows is only effective once the observer's run loop
+        // is actually pumping, so do not race past thread start-up.
+        _ = AXPoll.wait(timeout: 2.0, interval: 0.05) {
+            self.observerLock.lock(); defer { self.observerLock.unlock() }
+            return self.observerRunLoop != nil
+        }
         Log.accessibility.info("AXObserver established on Teams pid \(pid, privacy: .public)")
     }
 
@@ -341,6 +365,7 @@ public final class TeamsAccessibility {
     /// needs no Apple Events (Automation) permission — one fewer TCC prompt for the user.
     private func reopenWindowWithoutActivating() {
         guard let url = TeamsProcesses.applicationURL() else { return }
+
         let configuration = NSWorkspace.OpenConfiguration()
         configuration.activates = false
         configuration.addsToRecentItems = false
@@ -352,10 +377,37 @@ public final class TeamsAccessibility {
             semaphore.signal()
         }
         _ = semaphore.wait(timeout: .now() + 8)
+
+        if AXPoll.wait(timeout: 6) { self.health() != .noWindow } { return }
+
+        // LaunchServices does not always deliver a reopen to an already-running app.
+        // The Standard Suite `reopen` verb does, and Phase 0 verified it does not steal
+        // focus. It costs an Automation (Apple Events) consent for Teams, which is why it
+        // is the fallback rather than the first choice.
+        Log.accessibility.info("LaunchServices reopen did not restore a window; trying the AppleScript reopen verb")
+        let source = "tell application id \"\(TeamsProcesses.bundleIdentifier)\" to reopen"
+        guard let script = NSAppleScript(source: source) else { return }
+        var errorInfo: NSDictionary?
+        script.executeAndReturnError(&errorInfo)
+        if let errorInfo {
+            let code = (errorInfo[NSAppleScript.errorNumber] as? Int) ?? 0
+            Log.accessibility.error("AppleScript reopen failed (\(code, privacy: .public)); Teams may need to be opened manually")
+        }
     }
 
-    /// Clear the minimized flag on every Teams window. Verified in Phase 0 not to activate
-    /// the application.
+    /// Restore every minimized Teams window, without activating the application.
+    ///
+    /// Clearing `AXMinimized` alone is **not sufficient**, and this was the subtlest bug in
+    /// the whole target. The window comes back and the accessibility tree reads perfectly —
+    /// `health()` reports `.healthy` — yet Chromium silently discards every click and key
+    /// event, because it still considers the restored window occluded and has its renderer
+    /// throttled. Measured: `AXPress` on the profile control returned `.success` once a
+    /// second for eight seconds and never once opened the flyout.
+    ///
+    /// `AXRaise` orders the window in and un-throttles the renderer, after which activation
+    /// works immediately. Critically it raises the *window* without activating the *app*,
+    /// so the user's frontmost application and keyboard focus are untouched — verified by
+    /// measurement, not assumption.
     private func unminimizeWindows() {
         guard let pid = TeamsProcesses.pid() else { return }
         let app = AXElement(pid: pid)
@@ -363,5 +415,28 @@ public final class TeamsAccessibility {
         for window in windows {
             AXElement(window).setAttribute(kAXMinimizedAttribute as String, kCFBooleanFalse)
         }
+
+        _ = AXPoll.wait(timeout: 6) {
+            guard let refreshed = AXElement(pid: pid)
+                .rawAttribute(kAXWindowsAttribute as String) as? [AXUIElement] else { return false }
+            return refreshed.allSatisfy { window in
+                (AXElement(window).rawAttribute(kAXMinimizedAttribute as String) as? NSNumber)?.boolValue != true
+            }
+        }
+
+        raiseWindowsWithoutActivating()
+    }
+
+    /// Order the Teams windows in so Chromium resumes processing input. Does not activate
+    /// the application.
+    func raiseWindowsWithoutActivating() {
+        guard let pid = TeamsProcesses.pid() else { return }
+        guard let windows = AXElement(pid: pid)
+            .rawAttribute(kAXWindowsAttribute as String) as? [AXUIElement] else { return }
+        for window in windows {
+            AXElement(window).performAction(kAXRaiseAction as String)
+        }
+        // The renderer needs a beat after being un-throttled; poll rather than guess.
+        _ = AXPoll.wait(timeout: 3) { self.isTreeMaterialized() }
     }
 }

@@ -59,6 +59,35 @@ public final class TeamsAXTarget: PresenceTarget {
         accessibility.handleTeamsRestart()
     }
 
+    /// Run an automation step, and if it fails in a way that looks transient, repair the
+    /// accessibility surface and try once more.
+    ///
+    /// Justified by measurement rather than superstition: a window that has just been
+    /// un-minimized, or a Teams that has just relaunched, reports a perfectly readable
+    /// accessibility tree while its renderer still drops activations. One verified retry
+    /// after a fresh `ensureHealthy` converts those into successes instead of user-visible
+    /// failures. Genuinely broken selectors still fail on the second attempt.
+    private func withRecovery<T>(_ label: String, attempts: Int = 2, _ body: () throws -> T) throws -> T {
+        var lastError: Error?
+        for attempt in 1...attempts {
+            do {
+                return try body()
+            } catch let error as PresenceTargetError {
+                lastError = error
+                guard attempt < attempts else { break }
+                Log.teams.warning("\(label, privacy: .public) failed (attempt \(attempt, privacy: .public)): \(error.localizedDescription, privacy: .public); recovering")
+                closeFlyout()
+                try? accessibility.ensureHealthy()
+                // A Teams window that is present, un-throttled in the accessibility tree,
+                // and yet ignoring every activation is almost always an occluded window
+                // whose renderer Chromium has throttled. Ordering it in fixes that, and
+                // does not activate the app.
+                accessibility.raiseWindowsWithoutActivating()
+            }
+        }
+        throw lastError ?? PresenceTargetError.activationFailed(control: label)
+    }
+
     // MARK: - Element access
 
     private func appElement() throws -> AXElement {
@@ -143,6 +172,10 @@ public final class TeamsAXTarget: PresenceTarget {
     /// second line whenever a clear duration is active.
     public func readCurrentStatus() throws -> String? {
         lock.lock(); defer { lock.unlock() }
+        return try withRecovery("read status") { try readCurrentStatusOnce() }
+    }
+
+    private func readCurrentStatusOnce() throws -> String? {
         try accessibility.ensureHealthy()
         try openProfileFlyout()
         defer { closeFlyout() }
@@ -166,6 +199,10 @@ public final class TeamsAXTarget: PresenceTarget {
 
     public func apply(status: String) throws {
         lock.lock(); defer { lock.unlock() }
+        try withRecovery("apply status") { try applyOnce(status: status) }
+    }
+
+    private func applyOnce(status: String) throws {
         lastWarnings = []
 
         try accessibility.ensureHealthy()
@@ -339,6 +376,10 @@ public final class TeamsAXTarget: PresenceTarget {
 
     public func clearStatus() throws {
         lock.lock(); defer { lock.unlock() }
+        try withRecovery("clear status") { try clearStatusOnce() }
+    }
+
+    private func clearStatusOnce() throws {
         try accessibility.ensureHealthy()
         try openProfileFlyout()
 
