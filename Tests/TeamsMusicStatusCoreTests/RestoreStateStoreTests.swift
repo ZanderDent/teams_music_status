@@ -72,7 +72,7 @@ final class RestoreStateStoreTests: XCTestCase {
     func testRelaunchDoesNotAdoptOurOwnStatusAsTheUsersOriginal() {
         // First run: user had "Listening to: House"; the app writes over it.
         var firstRun = SyncEngine.State()
-        SyncEngine.recordWrite(state: &firstRun, status: "♪ Blow my mind — kage",
+        SyncEngine.recordWrite(state: &firstRun, status: "♪ Blow my mind by kage",
                                previousTeamsStatus: "Listening to: House")
         store().save(from: firstRun)
 
@@ -81,13 +81,13 @@ final class RestoreStateStoreTests: XCTestCase {
         store().load(into: &secondRun)
 
         // A new write must NOT recapture the baseline, because one is already known.
-        SyncEngine.recordWrite(state: &secondRun, status: "♪ catharsis — oklou",
-                               previousTeamsStatus: "♪ Blow my mind — kage")
+        SyncEngine.recordWrite(state: &secondRun, status: "♪ catharsis by oklou",
+                               previousTeamsStatus: "♪ Blow my mind by kage")
 
         XCTAssertEqual(secondRun.savedUserStatus, .some("Listening to: House"),
                        "the user's real status must survive a relaunch")
         XCTAssertEqual(SyncEngine.disableAction(state: secondRun,
-                                                currentTeamsStatus: "♪ catharsis — oklou"),
+                                                currentTeamsStatus: "♪ catharsis by oklou"),
                        .restore("Listening to: House"))
     }
 
@@ -106,7 +106,7 @@ final class RestoreStateStoreTests: XCTestCase {
         let action = engine.step(
             state: &secondRun,
             input: .init(presence: presence,
-                         rendered: "♪ B — X",
+                         rendered: "♪ B by X",
                          observedTeamsStatus: .some("In site meeting")),
             now: Date())
 

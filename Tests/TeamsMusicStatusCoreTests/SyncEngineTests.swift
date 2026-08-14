@@ -34,7 +34,7 @@ final class SyncEngineTests: XCTestCase {
         XCTAssertEqual(engine.step(state: &state, input: input(track), now: t0 + 4), .doNothing)
         // Window elapsed.
         XCTAssertEqual(engine.step(state: &state, input: input(track), now: t0 + 5),
-                       .write("♪ Dreams — Fleetwood Mac"))
+                       .write("♪ Dreams by Fleetwood Mac"))
     }
 
     func testSkippingTracksProducesOneWriteNotMany() {
@@ -52,13 +52,13 @@ final class SyncEngineTests: XCTestCase {
         let settled = playing("Track 3", id: "id-3")
         XCTAssertEqual(engine.step(state: &state, input: input(settled), now: t0 + 4), .doNothing)
         XCTAssertEqual(engine.step(state: &state, input: input(settled), now: t0 + 9),
-                       .write("♪ Track 3 — Fleetwood Mac"))
+                       .write("♪ Track 3 by Fleetwood Mac"))
     }
 
     func testUnchangedStatusIsNeverRewritten() {
         let engine = SyncEngine()
         var state = SyncEngine.State()
-        state.lastWrittenByApp = "♪ Dreams — Fleetwood Mac"
+        state.lastWrittenByApp = "♪ Dreams by Fleetwood Mac"
 
         XCTAssertEqual(engine.step(state: &state, input: input(playing()), now: t0), .doNothing)
         XCTAssertEqual(engine.step(state: &state, input: input(playing()), now: t0 + 60), .doNothing)
@@ -69,7 +69,7 @@ final class SyncEngineTests: XCTestCase {
     func testPauseInsideGracePeriodChangesNothing() {
         let engine = SyncEngine(configuration: .init(debounce: 5, pauseGrace: 300))
         var state = SyncEngine.State()
-        state.lastWrittenByApp = "♪ Dreams — Fleetwood Mac"
+        state.lastWrittenByApp = "♪ Dreams by Fleetwood Mac"
         state.savedUserStatus = .some("In the office")
 
         let paused = TrackPresence(trackName: "Dreams", artists: ["Fleetwood Mac"],
@@ -81,7 +81,7 @@ final class SyncEngineTests: XCTestCase {
     func testPauseBeyondGracePeriodRestoresThePreviousStatus() {
         let engine = SyncEngine(configuration: .init(debounce: 5, pauseGrace: 300))
         var state = SyncEngine.State()
-        state.lastWrittenByApp = "♪ Dreams — Fleetwood Mac"
+        state.lastWrittenByApp = "♪ Dreams by Fleetwood Mac"
         state.savedUserStatus = .some("In the office")
 
         let paused = TrackPresence(trackName: "Dreams", artists: ["Fleetwood Mac"],
@@ -109,7 +109,7 @@ final class SyncEngineTests: XCTestCase {
     func testNoPlaybackRestoresAfterGrace() {
         let engine = SyncEngine(configuration: .init(debounce: 5, pauseGrace: 60))
         var state = SyncEngine.State()
-        state.lastWrittenByApp = "♪ Dreams — Fleetwood Mac"
+        state.lastWrittenByApp = "♪ Dreams by Fleetwood Mac"
         state.savedUserStatus = .some(nil)   // user had no status before
 
         _ = engine.step(state: &state, input: input(nil), now: t0)
@@ -128,7 +128,7 @@ final class SyncEngineTests: XCTestCase {
     func testManualEditIsDetectedAndStopsFurtherWrites() {
         let engine = SyncEngine()
         var state = SyncEngine.State()
-        state.lastWrittenByApp = "♪ Dreams — Fleetwood Mac"
+        state.lastWrittenByApp = "♪ Dreams by Fleetwood Mac"
 
         let action = engine.step(state: &state,
                                  input: input(playing(), observed: .some("In site meeting")),
@@ -146,7 +146,7 @@ final class SyncEngineTests: XCTestCase {
     func testNotObservingTeamsIsNotTreatedAsAnEmptyStatus() {
         let engine = SyncEngine()
         var state = SyncEngine.State()
-        state.lastWrittenByApp = "♪ Dreams — Fleetwood Mac"
+        state.lastWrittenByApp = "♪ Dreams by Fleetwood Mac"
 
         // observed == nil means "we did not look", which must not read as an override.
         let action = engine.step(state: &state, input: input(playing(), observed: nil), now: t0)
@@ -157,10 +157,10 @@ final class SyncEngineTests: XCTestCase {
     func testStatusMatchingWhatWeWroteIsNotAnOverride() {
         let engine = SyncEngine()
         var state = SyncEngine.State()
-        state.lastWrittenByApp = "♪ Dreams — Fleetwood Mac"
+        state.lastWrittenByApp = "♪ Dreams by Fleetwood Mac"
 
         let action = engine.step(state: &state,
-                                 input: input(playing(), observed: .some("♪ Dreams — Fleetwood Mac")),
+                                 input: input(playing(), observed: .some("♪ Dreams by Fleetwood Mac")),
                                  now: t0)
         XCTAssertEqual(action, .doNothing)
         XCTAssertFalse(state.manualOverrideDetected)
@@ -202,7 +202,7 @@ final class SyncEngineTests: XCTestCase {
     /// then disabled the integration. Their text must survive.
     func testDisableKeepsAStatusTheUserTypedThemselves() {
         var state = SyncEngine.State()
-        SyncEngine.recordWrite(state: &state, status: "♪ Dreams — Fleetwood Mac",
+        SyncEngine.recordWrite(state: &state, status: "♪ Dreams by Fleetwood Mac",
                                previousTeamsStatus: "Old status")
 
         XCTAssertEqual(SyncEngine.disableAction(state: state,

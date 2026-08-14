@@ -21,6 +21,7 @@ public final class PresenceCoordinator: ObservableObject {
     @Published public var isEnabled: Bool = false {
         didSet {
             guard isEnabled != oldValue else { return }
+            Log.coordinator.info("isEnabled \(oldValue, privacy: .public) -> \(self.isEnabled, privacy: .public)")
             isEnabled ? start() : stop()
         }
     }

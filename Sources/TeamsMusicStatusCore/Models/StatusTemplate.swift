@@ -8,7 +8,7 @@ import Foundation
 /// Settings shows exactly what Teams will receive.
 public struct StatusTemplate: Equatable, Sendable {
 
-    public static let defaultTemplate = "♪ {track} — {artists}"
+    public static let defaultTemplate = "♪ {track} by {artists}"
 
     public enum Placeholder: String, CaseIterable, Sendable {
         case track = "{track}"
@@ -52,16 +52,49 @@ public struct StatusTemplate: Equatable, Sendable {
         return UnicodeSanitizer.clamp(sanitized, limit: limit)
     }
 
+    /// Separator tokens that may sit between two placeholders and become orphaned when
+    /// the one after them is empty — `"♪ Untitled by"` with no artist.
+    private static let separators = ["—", "–", "-", "·", "|", "by", "with", "feat.", "feat", "from"]
+
     private func substitute(into template: String,
                             presence: TrackPresence,
                             includeAlbum: Bool) -> String {
         var output = template
-        output = output.replacingOccurrences(of: Placeholder.track.rawValue, with: presence.trackName)
-        output = output.replacingOccurrences(of: Placeholder.artists.rawValue, with: presence.joinedArtists)
-        output = output.replacingOccurrences(of: Placeholder.artist.rawValue, with: presence.primaryArtist)
-        let album = includeAlbum ? (presence.albumName ?? "") : ""
-        output = output.replacingOccurrences(of: Placeholder.album.rawValue, with: album)
+        // Longest placeholder first: `{artist}` is a prefix of `{artists}`, and
+        // substituting the short one first would turn `{artists}` into "Dom Dollas".
+        let values: [(Placeholder, String)] = [
+            (.artists, presence.joinedArtists),
+            (.artist, presence.primaryArtist),
+            (.track, presence.trackName),
+            (.album, includeAlbum ? (presence.albumName ?? "") : ""),
+        ]
+
+        for (placeholder, value) in values {
+            if value.isEmpty {
+                // Remove the placeholder *and* any separator that introduces it, before
+                // substitution rather than by stripping trailing words afterwards. A
+                // post-hoc strip of a trailing " by" would also mangle a track genuinely
+                // called "Get by".
+                output = removePlaceholder(placeholder, from: output)
+            } else {
+                output = output.replacingOccurrences(of: placeholder.rawValue, with: value)
+            }
+        }
         return tidySeparators(output)
+    }
+
+    private func removePlaceholder(_ placeholder: Placeholder, from template: String) -> String {
+        let escaped = NSRegularExpression.escapedPattern(for: placeholder.rawValue)
+        let separatorAlternation = Self.separators
+            .map { NSRegularExpression.escapedPattern(for: $0) }
+            .joined(separator: "|")
+        // Optional leading separator, then the placeholder.
+        let pattern = "(?:\\s*(?:\(separatorAlternation)))?\\s*\(escaped)"
+        guard let regex = try? NSRegularExpression(pattern: pattern, options: [.caseInsensitive]) else {
+            return template.replacingOccurrences(of: placeholder.rawValue, with: "")
+        }
+        let range = NSRange(template.startIndex..<template.endIndex, in: template)
+        return regex.stringByReplacingMatches(in: template, range: range, withTemplate: "")
     }
 
     /// An empty placeholder leaves orphaned punctuation behind — `"Song —  (from )"`.

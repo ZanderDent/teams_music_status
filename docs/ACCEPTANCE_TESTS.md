@@ -103,7 +103,7 @@ Enable **Sync Spotify to Teams** first, and note your original Teams status.
 
 | # | Steps | Expected |
 |---|---|---|
-| E1 | Play a track | Teams status becomes `♪ <track> — <artists>` within ~10s (poll + debounce). |
+| E1 | Play a track | Teams status becomes `♪ <track> by <artists>` within ~10s (poll + debounce). |
 | E2 | Verify in Teams by hand | Profile ▸ the status matches exactly. |
 | E3 | Skip to another track | Status follows. |
 | E4 | Skip 5 tracks rapidly, then settle | **One** final Teams update, not five. Watch the flyout: it should open once. |

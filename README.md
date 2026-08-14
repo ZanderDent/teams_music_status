@@ -4,7 +4,7 @@ Discord-style rich presence for Microsoft Teams on macOS. It shows what you're l
 to as your Teams custom status message:
 
 ```
-♪ Dreams — Fleetwood Mac
+♪ Dreams by Fleetwood Mac
 ```
 
 A small menu-bar utility. No Dock icon, no window unless you ask for one.
@@ -171,7 +171,7 @@ Both implement the same `PresenceSource` interface, so switching is a menu choic
 
 ### Status template
 
-Default: `♪ {track} — {artists}`
+Default: `♪ {track} by {artists}`
 
 | Placeholder | Meaning |
 |---|---|

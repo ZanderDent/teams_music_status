@@ -13,7 +13,7 @@ final class TextRenderingTests: XCTestCase {
     // MARK: Template
 
     func testDefaultTemplateRendersTrackAndArtists() {
-        XCTAssertEqual(StatusTemplate().render(dreams), "♪ Dreams — Fleetwood Mac")
+        XCTAssertEqual(StatusTemplate().render(dreams), "♪ Dreams by Fleetwood Mac")
     }
 
     func testAllPlaceholdersResolve() {
@@ -31,6 +31,25 @@ final class TextRenderingTests: XCTestCase {
         let multi = TrackPresence(trackName: "T", artists: ["Dom Dolla", "Go Freek"],
                                   isPlaying: true, trackID: "x")
         XCTAssertEqual(StatusTemplate("{artists}").render(multi), "Dom Dolla, Go Freek")
+    }
+
+    /// A track genuinely called "Get by" must not have its own words eaten by the
+    /// orphaned-separator cleanup.
+    func testSeparatorCleanupDoesNotMangleTrackTitles() {
+        let getBy = TrackPresence(trackName: "Get by", artists: ["Talib Kweli"],
+                                  isPlaying: true, trackID: "x")
+        XCTAssertEqual(StatusTemplate("{track}").render(getBy), "Get by")
+        XCTAssertEqual(StatusTemplate().render(getBy), "♪ Get by by Talib Kweli")
+
+        let standby = TrackPresence(trackName: "Standby", artists: [], isPlaying: true, trackID: "y")
+        XCTAssertEqual(StatusTemplate("{track}").render(standby), "Standby")
+    }
+
+    func testMissingArtistDropsTheSeparatorWithIt() {
+        let noArtist = TrackPresence(trackName: "Untitled", artists: [], isPlaying: true, trackID: "x")
+        XCTAssertEqual(StatusTemplate().render(noArtist), "♪ Untitled")
+        XCTAssertEqual(StatusTemplate("{track} — {artists}").render(noArtist), "Untitled")
+        XCTAssertEqual(StatusTemplate("{track} feat. {artists}").render(noArtist), "Untitled")
     }
 
     func testEmptyAlbumDoesNotLeaveDanglingPunctuation() {

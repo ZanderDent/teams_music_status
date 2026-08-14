@@ -9,8 +9,8 @@ final class TeamsStatusParsingTests: XCTestCase {
     /// post-commit verification fail, and every manual-override check fire spuriously.
     func testOnlyTheFirstLineIsTheStatusMessage() {
         XCTAssertEqual(
-            TeamsAXTarget.firstLine(of: "♪ Dreams — Fleetwood Mac\nDisplay until 8:27 AM"),
-            "♪ Dreams — Fleetwood Mac")
+            TeamsAXTarget.firstLine(of: "♪ Dreams by Fleetwood Mac\nDisplay until 8:27 AM"),
+            "♪ Dreams by Fleetwood Mac")
     }
 
     func testSingleLineStatusIsUnchanged() {
@@ -139,6 +139,6 @@ final class TrackPresenceTests: XCTestCase {
     func testEmptyArtistsDoNotCrashRendering() {
         let presence = TrackPresence(trackName: "Untitled", artists: [], isPlaying: true, trackID: "x")
         XCTAssertEqual(presence.primaryArtist, "")
-        XCTAssertEqual(StatusTemplate().render(presence), "♪ Untitled")
+        XCTAssertEqual(StatusTemplate().render(presence), "♪ Untitled")  // separator dropped with the empty artist
     }
 }

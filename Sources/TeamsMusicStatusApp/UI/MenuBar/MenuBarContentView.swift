@@ -12,6 +12,11 @@ struct MenuBarContentView: View {
     @State private var isConnecting = false
     @State private var connectionError: String?
 
+    private var isOverridden: Bool {
+        if case .manualOverrideDetected = coordinator.state { return true }
+        return false
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             header
@@ -90,7 +95,10 @@ struct MenuBarContentView: View {
 
         if let rendered = coordinator.renderedStatus, !rendered.isEmpty {
             VStack(alignment: .leading, spacing: 3) {
-                Text("Showing in Teams")
+                // During a manual override this is what we *would* publish, not what
+                // Teams is actually showing — saying "Showing in Teams" there would be
+                // a plain lie, since the user's own status is on screen.
+                Text(isOverridden ? "Would show in Teams" : "Showing in Teams")
                     .font(.caption)
                     .foregroundStyle(.tertiary)
                 Text(rendered)
