@@ -18,11 +18,22 @@ concurrency:
 jobs:
   build-and-test:
     name: Build and test
-    runs-on: macos-14
+    runs-on: macos-15
     timeout-minutes: 20
 
     steps:
       - uses: actions/checkout@v4
+
+      - name: Select the newest Xcode on the runner
+        # The image's default Xcode can be older than the package requires — a default of
+        # Xcode 15 ships Swift 5.10, and Package.swift declares swift-tools-version 6.0.
+        # Picking the newest installed Xcode avoids pinning a version that will rot, and
+        # avoids depending on a third-party action to do it.
+        run: |
+          set -euo pipefail
+          latest=$(ls -d /Applications/Xcode*.app | sort -V | tail -1)
+          echo "Using $latest"
+          sudo xcode-select -s "$latest/Contents/Developer"
 
       - name: Show toolchain
         run: swift --version
