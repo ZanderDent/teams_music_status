@@ -1,0 +1,21 @@
+/.env
+.env
+*.env.local
+
+# Compiled spike binaries — rebuild with the commands in spikes/README.md
+spikes/teams-ax/probe
+spikes/teams-ax/dump
+spikes/teams-ax/teamsctl
+spikes/teams-ax/settext
+spikes/teams-ax/set_status
+spikes/teams-ax/enable_a11y
+spikes/teams-ax/unlock_a11y
+spikes/teams-ax/nodecount
+spikes/teams-ax/trigger_a11y
+spikes/teams-ax/observer_trigger
+spikes/teams-ax/enable_webview_a11y
+*.dSYM/
+
+.DS_Store
+__pycache__/
+*.pyc
