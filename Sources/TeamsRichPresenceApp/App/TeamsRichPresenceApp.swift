@@ -20,6 +20,7 @@ struct TeamsRichPresenceApp: App {
                 .environmentObject(environment.settings)
         } label: {
             MenuBarLabel(state: environment.coordinator.state)
+                .onAppear { AppDelegate.sharedEnvironment = environment }
         }
         .menuBarExtraStyle(.window)
 
@@ -32,12 +33,30 @@ struct TeamsRichPresenceApp: App {
     }
 }
 
+@MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
+
+    /// Set by the app scene so the delegate can present onboarding against the same
+    /// environment the UI is using.
+    static weak var sharedEnvironment: AppEnvironment?
+    private let onboarding = OnboardingWindowController()
+
     func applicationDidFinishLaunching(_ notification: Notification) {
         // Belt and braces: Info.plist already sets LSUIElement, but running the binary
         // directly (development) would otherwise bounce a Dock icon.
         NSApp.setActivationPolicy(.accessory)
         Log.app.info("Teams Rich Presence started")
+
+        // Show the first-run explainer when onboarding has not been completed, or when
+        // the Accessibility grant has since been revoked and nothing can work without it.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { [weak self] in
+            guard let self, let environment = Self.sharedEnvironment else { return }
+            let needsOnboarding = !environment.settings.hasCompletedOnboarding
+                || !TeamsAccessibility.hasAccessibilityPermission
+            if needsOnboarding {
+                self.onboarding.show(environment: environment)
+            }
+        }
     }
 
     func applicationSupportsSecureRestorableState(_ app: NSApplication) -> Bool { true }

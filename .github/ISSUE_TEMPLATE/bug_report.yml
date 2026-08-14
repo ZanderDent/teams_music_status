@@ -1,0 +1,102 @@
+name: Bug report
+description: Something isn't working
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for the report. If Teams updated recently, the selector self-test output
+        below usually identifies the problem straight away.
+
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: What did you expect, and what happened instead?
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Enable sync with the Spotify Web API source
+        2. Minimize Teams
+        3. Skip to the next track
+        4. ...
+    validations:
+      required: true
+
+  - type: input
+    id: macos
+    attributes:
+      label: macOS version
+      placeholder: "15.3.1 (arm64)"
+    validations:
+      required: true
+
+  - type: input
+    id: teams
+    attributes:
+      label: Microsoft Teams version
+      description: "`swift run trpctl version`, or Teams ▸ Settings ▸ About"
+    validations:
+      required: true
+
+  - type: input
+    id: app-version
+    attributes:
+      label: Teams Rich Presence version or commit
+    validations:
+      required: true
+
+  - type: dropdown
+    id: source
+    attributes:
+      label: Which music source?
+      options:
+        - Spotify Web API
+        - Local Spotify app
+        - Both / not sure
+    validations:
+      required: true
+
+  - type: textarea
+    id: diagnostics
+    attributes:
+      label: Diagnostics
+      description: |
+        Output of these three commands. They contain no credentials.
+      value: |
+        <details><summary>trpctl output</summary>
+
+        ```
+        $ swift run trpctl version
+
+        $ swift run trpctl health
+
+        $ swift run trpctl selftest
+
+        ```
+        </details>
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs (optional)
+      description: |
+        `log show --predicate 'subsystem == "com.zanderdent.TeamsRichPresence"' --last 30m --style compact`
+
+        Please read them first — they include your status text, which may be personal.
+        They do not include tokens.
+
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Before submitting
+      options:
+        - label: I have removed anything personal or work-confidential from the output above
+          required: true

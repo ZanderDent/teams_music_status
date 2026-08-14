@@ -1,0 +1,43 @@
+name: Feature request
+description: Suggest an idea
+labels: [enhancement]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: What problem would this solve?
+      description: Describe the situation you're in, not just the feature you want.
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: What would you like to happen?
+    validations:
+      required: true
+
+  - type: dropdown
+    id: area
+    attributes:
+      label: Which part of the app?
+      options:
+        - A new music/activity source (Apple Music, editors, ...)
+        - Status formatting
+        - Teams behaviour
+        - Menu bar / settings
+        - Another platform
+        - Something else
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives you have considered
+
+  - type: markdown
+    attributes:
+      value: |
+        **Note:** Windows support, Microsoft Graph integration, telemetry and a hosted
+        backend are explicitly out of scope for now — see the README.
