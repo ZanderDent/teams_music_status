@@ -95,6 +95,16 @@ cat > "$APP_DIR/Contents/Info.plist" <<PLIST
 PLIST
 
 # ---- signing -----------------------------------------------------------------
+#
+# The entitlements file must stay bare XML with no comments: codesign hands it to
+# AMFI, whose parser is stricter than plutil and fails on a comment block with
+# "AMFIUnserializeXML: syntax error". A silent failure here is expensive, because the
+# app then runs WITHOUT com.apple.security.automation.apple-events and macOS refuses
+# every Apple Event with -1743 and never prompts -- which is indistinguishable from
+# the user having denied Automation access.
+#
+# The entitlement is needed because we sign with the hardened runtime. Without it the
+# Local Spotify source and the AppleScript window-reopen fallback cannot work.
 IDENTITY="${CODESIGN_IDENTITY:-}"
 if [ -z "$IDENTITY" ]; then
   # Select by SHA-1 hash, not by name: the same certificate name can appear in more
@@ -106,12 +116,12 @@ fi
 
 if [ -n "$IDENTITY" ]; then
   echo "==> codesign with identity ${IDENTITY:0:8}…"
-  codesign --force --sign "$IDENTITY" --options runtime --timestamp=none "$APP_DIR" 2>&1 | sed 's/^/    /'
+  codesign --force --sign "$IDENTITY" --options runtime --timestamp=none --entitlements "$ROOT/scripts/TeamsMusicStatus.entitlements" "$APP_DIR" 2>&1 | sed 's/^/    /'
 else
   echo "==> no signing identity found; signing ad hoc"
   echo "    NOTE: macOS may drop the Accessibility grant on every rebuild."
   echo "    Set CODESIGN_IDENTITY to a stable certificate to avoid re-granting."
-  codesign --force --sign - "$APP_DIR" 2>&1 | sed 's/^/    /'
+  codesign --force --sign - --entitlements "$ROOT/scripts/TeamsMusicStatus.entitlements" "$APP_DIR" 2>&1 | sed 's/^/    /'
 fi
 
 codesign --verify --verbose=1 "$APP_DIR" 2>&1 | sed 's/^/    /'

@@ -196,7 +196,7 @@ Environment: macOS 15.3.1 (arm64, M1 Pro) · Teams **26198.202.4929.7171** · Sp
 | B. Menu-bar app, no Dock icon, onboarding on first run | pass |
 | C. Spotify Web API: connect via the app's own button, token in Keychain, redacted in logs | pass |
 | C. Track/artist/album/playing read from the real account | pass |
-| D. Spotify Local: reads the desktop app, primary artist only | pass via `tmsctl`; **blocked in-app on Automation consent** |
+| D. Spotify Local: reads the desktop app, primary artist only | pass, in-app, after adding the apple-events entitlement |
 | E1–E3. Play / verify in Teams / track change | pass |
 | E4. Four rapid skips → **one** Teams update | pass |
 | E5. Idle: Teams untouched between changes | pass |
@@ -234,3 +234,10 @@ Environment: macOS 15.3.1 (arm64, M1 Pro) · Teams **26198.202.4929.7171** · Sp
 5. A Keychain read on the main thread during launch hung the app with no UI and no logs.
 6. The self-test blamed three selectors when it had merely failed to open the editor,
    which permanently disabled sync.
+7. The signed app was missing `com.apple.security.automation.apple-events`. Because it
+   is signed with the hardened runtime, macOS refused every Apple Event with -1743 and
+   never showed a consent prompt — indistinguishable from the user denying access. This
+   made the Local Spotify source and the AppleScript window-reopen fallback impossible
+   in any signed build. Compounding it, `codesign` hands the entitlements file to AMFI,
+   whose parser rejects XML comments, so an annotated entitlements file was silently
+   ignored and produced the same symptom.
