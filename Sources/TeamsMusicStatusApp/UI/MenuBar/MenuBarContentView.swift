@@ -29,6 +29,7 @@ struct MenuBarContentView: View {
                     .buttonStyle(.borderedProminent)
                     .controlSize(.small)
                     .padding(.top, 6)
+                    .accessibilityLabel("Resume automatic status updates")
             }
 
             if !coordinator.lastWarnings.isEmpty {
@@ -113,6 +114,7 @@ struct MenuBarContentView: View {
             }
             .controlSize(.small)
             .padding(.top, 6)
+            .accessibilityLabel("Open Accessibility settings")
         }
     }
 
@@ -145,12 +147,14 @@ struct MenuBarContentView: View {
             if environment.isSpotifyConnected {
                 Button("Disconnect Spotify") { environment.disconnectSpotify() }
                     .controlSize(.small)
+                    .accessibilityLabel("Disconnect Spotify")
             } else {
                 Button(isConnecting ? "Waiting for Spotify…" : "Connect Spotify…") {
                     connect()
                 }
                 .controlSize(.small)
                 .disabled(isConnecting || environment.configurationProblem != nil)
+                .accessibilityLabel(isConnecting ? "Waiting for Spotify" : "Connect Spotify")
             }
             if isConnecting { ProgressView().controlSize(.small) }
         }
@@ -183,14 +187,17 @@ struct MenuBarContentView: View {
                 ))
                 .toggleStyle(.checkbox)
                 .controlSize(.small)
+                .accessibilityLabel("Launch at login")
             }
 
             HStack {
                 SettingsLink { Text("Settings…") }
                     .controlSize(.small)
+                    .accessibilityLabel("Open Settings")
                 Spacer()
                 Button("Quit") { NSApplication.shared.terminate(nil) }
                     .controlSize(.small)
+                    .accessibilityLabel("Quit Teams Music Status")
             }
         }
     }
