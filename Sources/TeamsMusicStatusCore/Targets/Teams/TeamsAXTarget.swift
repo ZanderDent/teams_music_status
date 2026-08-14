@@ -187,6 +187,7 @@ public final class TeamsAXTarget: PresenceTarget {
         return Self.firstLine(of: readout.value)
     }
 
+    /// Exposed for testing: Teams appends "Display until H:MM AM" as a second line.
     static func firstLine(of value: String?) -> String? {
         guard let value else { return nil }
         let line = value.split(separator: "\n", maxSplits: 1, omittingEmptySubsequences: false)
