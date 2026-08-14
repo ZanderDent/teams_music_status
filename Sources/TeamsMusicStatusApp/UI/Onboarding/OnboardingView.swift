@@ -2,155 +2,347 @@ import AppKit
 import SwiftUI
 import TeamsMusicStatusCore
 
-/// First-run explainer.
+/// First-run flow.
 ///
-/// Accessibility is a powerful permission and users are right to hesitate before granting
-/// it. Rather than firing the system prompt out of nowhere, say plainly what the app does
-/// with it and — just as importantly — what it does not.
+/// Three principles, learned from watching this go wrong:
+///
+/// 1. **Every step verifies itself.** A tick means the thing actually works — the source
+///    step turns green only after a real read of what is playing, not after a checkbox.
+/// 2. **Nothing is deferred to "go find it later".** Spotify is connected here, sync is
+///    switched on here. Previously the user finished onboarding and then had to discover
+///    a menu-bar icon they had never seen to do anything at all.
+/// 3. **The app is invisible by design**, so the last screen says where it lives.
 struct OnboardingView: View {
 
     @EnvironmentObject private var environment: AppEnvironment
-    @EnvironmentObject private var settings: AppSettings
-
-    @State private var hasAccessibility = TeamsAccessibility.hasAccessibilityPermission
-    private let recheck = Timer.publish(every: 1.5, on: .main, in: .common).autoconnect()
+    @StateObject private var model: OnboardingModel
+    @State private var launchAtLogin = false
 
     var onFinish: () -> Void
 
+    init(environment: AppEnvironment, onFinish: @escaping () -> Void) {
+        _model = StateObject(wrappedValue: OnboardingModel(environment: environment))
+        self.onFinish = onFinish
+    }
+
     var body: some View {
-        VStack(alignment: .leading, spacing: 18) {
-            VStack(alignment: .leading, spacing: 6) {
-                Text("Teams Music Status")
-                    .font(.title2.weight(.semibold))
-                Text("Shows what you're listening to as your Microsoft Teams status.")
-                    .foregroundStyle(.secondary)
+        VStack(alignment: .leading, spacing: 0) {
+            header
+            Divider()
+
+            ScrollView {
+                VStack(alignment: .leading, spacing: 22) {
+                    accessibilityStep
+                    sourceStep
+                    teamsStep
+                }
+                .padding(24)
             }
 
             Divider()
+            footer
+        }
+        .frame(width: 560, height: 620)
+        .onAppear {
+            model.startPolling()
+            launchAtLogin = model.launchAtLoginEnabled
+        }
+        .onDisappear { model.stopPolling() }
+    }
 
-            step(number: 1,
-                 title: "Allow Accessibility access",
-                 done: hasAccessibility) {
-                VStack(alignment: .leading, spacing: 8) {
-                    Text("Teams has no API for the custom status message, so this app updates "
-                         + "it the same way you would: it opens your profile menu and types. "
-                         + "macOS calls that Accessibility access.")
-                        .font(.callout)
-                        .foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
+    // MARK: Header
 
-                    Label("It never reads your Teams messages, and it does not take over your "
-                          + "keyboard — updates happen in the background while you keep working.",
-                          systemImage: "hand.raised")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
-
-                    if !hasAccessibility {
-                        Button("Open Accessibility settings…") {
-                            TeamsAccessibility.requestAccessibilityPermission()
-                            TeamsAccessibility.openAccessibilitySettings()
-                        }
-                        .buttonStyle(.borderedProminent)
-                    }
-                }
-            }
-
-            step(number: 2,
-                 title: "Connect a music source",
-                 done: environment.isSpotifyConnected) {
-                VStack(alignment: .leading, spacing: 8) {
-                    Picker("Source", selection: $settings.sourceKind) {
-                        ForEach(PresenceSourceKind.allCases, id: \.self) { kind in
-                            Text(kind.displayName).tag(kind)
-                        }
-                    }
-                    .pickerStyle(.radioGroup)
-
-                    Text(settings.sourceKind.summary)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-            }
-
-            Spacer(minLength: 0)
-
-            HStack {
-                Text(hasAccessibility
-                     ? "You're ready. Open the menu-bar icon to turn syncing on."
-                     : "Accessibility access is required before syncing can start.")
-                    .font(.caption)
+    private var header: some View {
+        HStack(spacing: 14) {
+            Image(systemName: "music.note")
+                .font(.system(size: 26))
+                .foregroundStyle(.tint)
+                .frame(width: 44, height: 44)
+                .background(.tint.opacity(0.12), in: RoundedRectangle(cornerRadius: 10))
+            VStack(alignment: .leading, spacing: 3) {
+                Text("Teams Music Status").font(.title2.weight(.semibold))
+                Text("Shows what you're listening to as your Microsoft Teams status.")
                     .foregroundStyle(.secondary)
-                Spacer()
-                Button("Done") {
-                    settings.hasCompletedOnboarding = true
-                    onFinish()
+            }
+            Spacer()
+        }
+        .padding(24)
+    }
+
+    // MARK: Step 1 — Accessibility
+
+    private var accessibilityStep: some View {
+        step(number: 1, title: "Allow Accessibility access", done: model.hasAccessibility) {
+            if model.hasAccessibility {
+                Text("Granted. Teams Music Status can update your status.")
+                    .font(.callout).foregroundStyle(.secondary)
+            } else {
+                VStack(alignment: .leading, spacing: 10) {
+                    Text("Teams has no API for the custom status message, so this app updates it "
+                         + "the way you would: it opens your profile menu and types.")
+                        .font(.callout).foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+
+                    Label("It never reads your messages, and it never takes your keyboard — "
+                          + "updates happen in the background while you keep working.",
+                          systemImage: "hand.raised")
+                        .font(.caption).foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+
+                    Button("Allow Accessibility Access…") { model.requestAccessibility() }
+                        .buttonStyle(.borderedProminent)
+                        .accessibilityLabel("Allow Accessibility access")
+
+                    Text("Switch on **TeamsMusicStatus** in the list that opens. "
+                         + "This window updates by itself once you do.")
+                        .font(.caption).foregroundStyle(.tertiary)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
-                .keyboardShortcut(.defaultAction)
             }
         }
-        .padding(22)
-        .frame(width: 520, height: 460)
-        .onReceive(recheck) { _ in
-            hasAccessibility = TeamsAccessibility.hasAccessibilityPermission
+    }
+
+    // MARK: Step 2 — Music source
+
+    private var sourceStep: some View {
+        step(number: 2, title: "Connect your music", done: model.sourceCheck.isReady) {
+            VStack(alignment: .leading, spacing: 12) {
+                if let problem = model.configurationProblem,
+                   model.settings.sourceKind == .spotifyWebAPI {
+                    calloutRow(icon: "exclamationmark.triangle", tint: .orange, text: problem)
+                }
+
+                Picker("", selection: Binding(
+                    get: { model.settings.sourceKind },
+                    set: { model.settings.sourceKind = $0; model.sourceChanged() }
+                )) {
+                    ForEach(PresenceSourceKind.allCases, id: \.self) { kind in
+                        Text(kind.displayName).tag(kind)
+                    }
+                }
+                .pickerStyle(.radioGroup)
+                .labelsHidden()
+
+                Text(model.settings.sourceKind.summary)
+                    .font(.caption).foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                sourceActions
+            }
         }
     }
 
     @ViewBuilder
-    private func step<Content: View>(number: Int, title: String, done: Bool,
-                                     @ViewBuilder content: () -> Content) -> some View {
-        HStack(alignment: .top, spacing: 12) {
-            ZStack {
-                Circle()
-                    .fill(done ? Color.green : Color.secondary.opacity(0.25))
-                    .frame(width: 22, height: 22)
-                if done {
-                    Image(systemName: "checkmark")
-                        .font(.caption.bold())
-                        .foregroundStyle(.white)
+    private var sourceActions: some View {
+        HStack(spacing: 10) {
+            if model.needsSpotifySignIn {
+                Button(model.isConnecting ? "Waiting for Spotify…" : "Sign in to Spotify…") {
+                    model.connectSpotify()
+                }
+                .buttonStyle(.borderedProminent)
+                .disabled(model.isConnecting || model.configurationProblem != nil)
+                .accessibilityLabel("Sign in to Spotify")
+            } else {
+                // `.bordered` and `.borderedProminent` are different types, so they cannot
+                // be selected with a ternary inside `.buttonStyle`.
+                let check = Button(checkButtonTitle) { Task { await model.verifySource() } }
+                    .disabled(model.sourceCheck == .checking)
+                    .accessibilityLabel(checkButtonTitle)
+                if model.sourceCheck.isReady {
+                    check.buttonStyle(.bordered)
                 } else {
-                    Text("\(number)").font(.caption.bold())
+                    check.buttonStyle(.borderedProminent)
                 }
             }
-            VStack(alignment: .leading, spacing: 6) {
+            if model.isConnecting || model.sourceCheck == .checking {
+                ProgressView().controlSize(.small)
+            }
+        }
+
+        if let error = model.connectError {
+            calloutRow(icon: "xmark.circle", tint: .red, text: error)
+        }
+
+        switch model.sourceCheck {
+        case .ready(let nowPlaying):
+            if let nowPlaying {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("Your Teams status will read").font(.caption).foregroundStyle(.tertiary)
+                    Text(nowPlaying)
+                        .font(.body.monospaced()).textSelection(.enabled)
+                }
+                .padding(10)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(.quaternary.opacity(0.4), in: RoundedRectangle(cornerRadius: 6))
+            } else {
+                Text("Connected. Nothing is playing right now — start a track and your status "
+                     + "will follow.")
+                    .font(.caption).foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        case .failed(let message):
+            calloutRow(icon: "exclamationmark.triangle", tint: .orange, text: message)
+        case .notChecked, .checking:
+            EmptyView()
+        }
+    }
+
+    private var checkButtonTitle: String {
+        if model.sourceCheck.isReady { return "Check again" }
+        return model.settings.sourceKind == .spotifyLocal ? "Check Spotify Access" : "Check Connection"
+    }
+
+    // MARK: Step 3 — Teams
+
+    private var teamsStep: some View {
+        step(number: 3, title: "Microsoft Teams", done: model.teamsRunning) {
+            if model.teamsRunning {
+                Text("Teams is running. Your status will update automatically — you can leave "
+                     + "it in the background or minimised.")
+                    .font(.callout).foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            } else {
+                VStack(alignment: .leading, spacing: 10) {
+                    Text("Teams isn't running, so there's nothing to update yet. Start it and "
+                         + "this will tick itself.")
+                        .font(.callout).foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                    Button("Open Microsoft Teams") { model.launchTeams() }
+                        .accessibilityLabel("Open Microsoft Teams")
+                }
+            }
+        }
+    }
+
+    // MARK: Footer
+
+    private var footer: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(spacing: 8) {
+                Image(systemName: "menubar.arrow.up.rectangle").foregroundStyle(.secondary)
+                Text("Teams Music Status lives in your menu bar — look for the "
+                     + "\(Image(systemName: "music.note")) icon. It has no Dock icon.")
+                    .font(.caption).foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            if model.launchAtLoginSupported {
+                Toggle("Start Teams Music Status when I log in", isOn: $launchAtLogin)
+                    .toggleStyle(.checkbox)
+                    .controlSize(.small)
+                    .onChange(of: launchAtLogin) { _, newValue in model.setLaunchAtLogin(newValue) }
+                    .accessibilityLabel("Start Teams Music Status when I log in")
+            }
+
+            HStack {
+                Button("Set up later") {
+                    model.finish(enableSync: false)
+                    onFinish()
+                }
+                .accessibilityLabel("Set up later")
+
+                Spacer()
+
+                Button(model.canFinish ? "Start Syncing" : "Finish") {
+                    model.finish(enableSync: model.canFinish)
+                    onFinish()
+                }
+                .buttonStyle(.borderedProminent)
+                .keyboardShortcut(.defaultAction)
+                .disabled(!model.canFinish)
+                .accessibilityLabel(model.canFinish ? "Start syncing" : "Finish setup")
+            }
+        }
+        .padding(24)
+    }
+
+    // MARK: Building blocks
+
+    @ViewBuilder
+    private func step<Content: View>(number: Int, title: String, done: Bool,
+                                     @ViewBuilder content: () -> Content) -> some View {
+        HStack(alignment: .top, spacing: 14) {
+            ZStack {
+                Circle()
+                    .fill(done ? Color.green : Color.secondary.opacity(0.2))
+                    .frame(width: 24, height: 24)
+                if done {
+                    Image(systemName: "checkmark").font(.caption.bold()).foregroundStyle(.white)
+                } else {
+                    Text("\(number)").font(.caption.bold()).foregroundStyle(.secondary)
+                }
+            }
+            .accessibilityHidden(true)
+
+            VStack(alignment: .leading, spacing: 8) {
                 Text(title).font(.headline)
                 content()
             }
+            Spacer(minLength: 0)
+        }
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("Step \(number), \(title), \(done ? "complete" : "not complete")")
+    }
+
+    private func calloutRow(icon: String, tint: Color, text: String) -> some View {
+        HStack(alignment: .top, spacing: 6) {
+            Image(systemName: icon).foregroundStyle(tint)
+            Text(text).font(.caption).foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
         }
     }
 }
 
-/// Hosts `OnboardingView` in a normal window. The app is `LSUIElement`, so the window has
-/// to be activated explicitly or it opens behind everything.
+/// Hosts `OnboardingView` in a normal window.
+///
+/// The app is `LSUIElement`, so it has no Dock icon and its windows open behind whatever
+/// the user is doing unless the app is explicitly activated. On a first run that would
+/// mean the setup window is simply never seen.
 @MainActor
-final class OnboardingWindowController {
+final class OnboardingWindowController: NSObject, NSWindowDelegate {
     private var window: NSWindow?
+    private var onClose: (() -> Void)?
 
-    func show(environment: AppEnvironment) {
+    func show(environment: AppEnvironment, onClose: (() -> Void)? = nil) {
+        self.onClose = onClose
+
         if let window {
-            window.makeKeyAndOrderFront(nil)
-            NSApp.activate(ignoringOtherApps: true)
+            bringToFront(window)
             return
         }
 
         let controller = NSHostingController(
-            rootView: OnboardingView(onFinish: { [weak self] in self?.close() })
+            rootView: OnboardingView(environment: environment,
+                                     onFinish: { [weak self] in self?.close() })
                 .environmentObject(environment)
                 .environmentObject(environment.settings)
+                .environmentObject(environment.coordinator)
         )
         let window = NSWindow(contentViewController: controller)
-        window.title = "Welcome to Teams Music Status"
+        window.title = "Set Up Teams Music Status"
         window.styleMask = [.titled, .closable]
         window.isReleasedWhenClosed = false
+        window.delegate = self
         window.center()
         self.window = window
+        bringToFront(window)
+    }
 
-        window.makeKeyAndOrderFront(nil)
+    private func bringToFront(_ window: NSWindow) {
+        // Briefly become a regular app so the setup window can take focus like any other,
+        // then drop back to accessory so no Dock icon lingers once it is dismissed.
+        NSApp.setActivationPolicy(.regular)
         NSApp.activate(ignoringOtherApps: true)
+        window.makeKeyAndOrderFront(nil)
+        window.orderFrontRegardless()
     }
 
     func close() {
         window?.close()
+    }
+
+    func windowWillClose(_ notification: Notification) {
+        NSApp.setActivationPolicy(.accessory)
+        onClose?()
     }
 }
