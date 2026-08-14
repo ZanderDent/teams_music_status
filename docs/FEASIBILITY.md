@@ -445,7 +445,7 @@ Worth measuring whether Teams can be updated less obtrusively; not solved here.
 ## 9. Security implications
 
 1. **`.env` contains a Spotify client secret that this design does not need and must not ship.**
-   `SPOTIFY_CLIENT_SECRET` is present in `<repo>/.env`.
+   `SPOTIFY_CLIENT_SECRET` was present in the repository's local, git-ignored `.env`.
    PKCE exists precisely so a distributed desktop app never holds a secret. `.env` *is*
    gitignored, so it has not been committed — but the secret has been sitting in plaintext on
    disk. **Recommendation: rotate it in the Spotify dashboard and delete the line.** The client
@@ -471,7 +471,7 @@ Worth measuring whether Teams can be updated less obtrusively; not solved here.
 
 This is the area I would most want your input on, because it is policy as much as engineering.
 
-* **Teams here is signed, sandboxed, and corporate** — signed in as `a corporate tenant account (redacted)`.
+* **Teams here is signed, sandboxed, and corporate** — signed in to a corporate tenant account (redacted).
   The status message is a corporate-visible field.
 * **TCC grants can be centrally controlled.** An MDM can pre-approve Accessibility and Apple
   Events for a specific signed bundle id via a PPPC configuration profile — which makes fleet

@@ -73,22 +73,39 @@ public final class AppEnvironment: ObservableObject {
         settings.sourceKind == .spotifyLocal ? localSource : webSource
     }
 
-    public var isSpotifyConnected: Bool {
-        settings.sourceKind == .spotifyLocal ? localSource.isAuthorized : spotifyAuth.isAuthorized
+    public var isSpotifyConnected: Bool { spotifyConnected }
+
+    /// Whether a Spotify connection is usable. Published so the UI updates once the
+    /// Keychain has been read, which deliberately happens after launch (see SpotifyAuth).
+    @Published public private(set) var spotifyConnected = false
+
+    /// Run the one-time and on-upgrade checks. Called from the UI's `.task`, so it is
+    /// already off the launch critical path.
+    public func performStartupChecks() async {
+        // Keychain first: blocking securityd on the main thread hangs a menu-bar app
+        // outright, so this hops off it explicitly.
+        let auth = spotifyAuth
+        await Task.detached(priority: .utility) { auth.primeFromKeychain() }.value
+        refreshSpotifyConnection()
+        await coordinator.runSelfTestIfNeeded()
+        coordinator.refreshSoon()
     }
 
-    /// Run the one-time and on-upgrade checks.
-    public func performStartupChecks() async {
-        await coordinator.runSelfTestIfNeeded()
+    public func refreshSpotifyConnection() {
+        spotifyConnected = settings.sourceKind == .spotifyLocal
+            ? localSource.isAuthorized
+            : spotifyAuth.isAuthorized
     }
 
     public func connectSpotify() async throws {
         try await spotifyAuth.authorize()
+        refreshSpotifyConnection()
         coordinator.refreshSoon()
     }
 
     public func disconnectSpotify() {
         spotifyAuth.signOut()
+        refreshSpotifyConnection()
         coordinator.refreshSoon()
     }
 }

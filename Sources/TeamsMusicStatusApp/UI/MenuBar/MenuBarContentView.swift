@@ -142,7 +142,7 @@ struct MenuBarContentView: View {
     @ViewBuilder
     private var spotifyConnectionRow: some View {
         HStack(spacing: 8) {
-            if environment.spotifyAuth.isAuthorized {
+            if environment.isSpotifyConnected {
                 Button("Disconnect Spotify") { environment.disconnectSpotify() }
                     .controlSize(.small)
             } else {

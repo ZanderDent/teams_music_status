@@ -192,7 +192,7 @@ struct PermissionsTab: View {
 
             Section("Spotify account") {
                 LabeledContent("Connection") {
-                    Text(environment.spotifyAuth.isAuthorized ? "Connected" : "Not connected")
+                    Text(environment.isSpotifyConnected ? "Connected" : "Not connected")
                         .foregroundStyle(.secondary)
                 }
                 Text("Sign-in uses OAuth with PKCE. No client secret is used, and your tokens "
@@ -200,7 +200,7 @@ struct PermissionsTab: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
-                if environment.spotifyAuth.isAuthorized {
+                if environment.isSpotifyConnected {
                     Button("Disconnect Spotify") { environment.disconnectSpotify() }
                 }
             }

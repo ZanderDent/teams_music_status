@@ -90,7 +90,27 @@ public final class SpotifyAuth {
         self.configuration = configuration
         self.keychain = keychain
         self.session = session
-        self.cachedTokens = try? keychain.value(Tokens.self, account: Self.keychainAccount)
+        // Deliberately NO Keychain access here.
+        //
+        // This initialiser runs inside SwiftUI's @StateObject construction, on the main
+        // thread, during app launch. SecItemCopyMatching can block indefinitely on
+        // securityd — for example when the item was written by a different code identity
+        // and macOS wants to prompt. A menu-bar app has no window to show that prompt
+        // over, so the app simply hangs at launch with no UI and no logs. Observed and
+        // sampled during acceptance testing.
+        //
+        // Call `primeFromKeychain()` off the main thread instead.
+    }
+
+    /// Load stored tokens. **Never call this on the main thread** — see `init`.
+    /// Idempotent and safe to call repeatedly.
+    public func primeFromKeychain() {
+        let loaded = try? keychain.value(Tokens.self, account: Self.keychainAccount)
+        lock.lock()
+        if cachedTokens == nil { cachedTokens = loaded }
+        let authorized = cachedTokens != nil
+        lock.unlock()
+        Log.oauth.info("Keychain primed; Spotify \(authorized ? "connected" : "not connected", privacy: .public)")
     }
 
     // MARK: - State

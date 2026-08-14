@@ -32,17 +32,28 @@ public final class PresenceCoordinator: ObservableObject {
     private var source: PresenceSource
     private var engine: SyncEngine
     private var engineState = SyncEngine.State()
+    /// Survives relaunches so an app restart cannot make the app adopt its own leftover
+    /// status as the user's baseline. See RestoreStateStore for the full rationale.
+    private let restoreStore: RestoreStateStore
 
     private var pollTask: Task<Void, Never>?
     private var teamsObservers: [NSObjectProtocol] = []
     private var knownTeamsPID: pid_t?
     private var consecutiveFailures = 0
 
-    public init(target: TeamsAXTarget, source: PresenceSource, settings: AppSettings) {
+    public init(target: TeamsAXTarget,
+                source: PresenceSource,
+                settings: AppSettings,
+                restoreStore: RestoreStateStore = RestoreStateStore()) {
         self.target = target
         self.source = source
         self.settings = settings
+        self.restoreStore = restoreStore
         self.engine = SyncEngine(configuration: settings.syncConfiguration)
+        restoreStore.load(into: &engineState)
+        if let carried = engineState.lastWrittenByApp {
+            Log.coordinator.info("resuming ownership of a status written before relaunch: \(Redact.status(carried), privacy: .public)")
+        }
         target.clearAfter = settings.clearAfter
         target.showWhenMessaged = settings.showWhenMessaged
         observeTeamsLifecycle()
@@ -78,6 +89,7 @@ public final class PresenceCoordinator: ObservableObject {
         // Whatever the user typed is now the status to restore later.
         engineState.savedUserStatus = nil
         engineState.lastWrittenByApp = nil
+        restoreStore.clear()
         Log.coordinator.info("user resumed automatic status updates")
         refreshSoon()
     }
@@ -112,6 +124,7 @@ public final class PresenceCoordinator: ObservableObject {
         }
         await perform(.restore(previous))
         engineState = SyncEngine.State()
+        restoreStore.clear()
     }
 
     /// Poll now rather than waiting out the current interval.
@@ -212,6 +225,8 @@ public final class PresenceCoordinator: ObservableObject {
                 if let written = engineState.lastWrittenByApp, current != written {
                     engineState.manualOverrideDetected = true
                     state = .manualOverrideDetected(current)
+                    // The user owns the status now, so stop claiming it across relaunches.
+                    restoreStore.clear()
                     Log.coordinator.info("manual status edit detected; pausing automatic updates")
                     return
                 }
@@ -219,6 +234,7 @@ public final class PresenceCoordinator: ObservableObject {
                 try await runOffMain { try self.target.apply(status: status) }
                 SyncEngine.recordWrite(state: &engineState, status: status,
                                        previousTeamsStatus: current)
+                restoreStore.save(from: engineState)
                 lastWarnings = target.lastWarnings
                 consecutiveFailures = 0
                 state = .ready
@@ -237,6 +253,7 @@ public final class PresenceCoordinator: ObservableObject {
                     try await runOffMain { try self.target.clearStatus() }
                     Log.coordinator.info("cleared the Teams status")
                 }
+                restoreStore.clear()
                 state = .noPlayback
             } catch {
                 handleTargetError(error)
