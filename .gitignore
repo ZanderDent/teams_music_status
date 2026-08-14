@@ -19,3 +19,9 @@ spikes/teams-ax/enable_webview_a11y
 .DS_Store
 __pycache__/
 *.pyc
+
+# SwiftPM / app build output
+/.build/
+/build/
+*.xcodeproj
+Config/Spotify.plist
