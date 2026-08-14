@@ -42,7 +42,7 @@ struct OnboardingView: View {
             Divider()
             footer
         }
-        .frame(width: 560, height: 620)
+        .frame(width: 560, height: 700)
         .onAppear {
             model.startPolling()
             launchAtLogin = model.launchAtLoginEnabled
@@ -93,8 +93,8 @@ struct OnboardingView: View {
                         .buttonStyle(.borderedProminent)
                         .accessibilityLabel("Allow Accessibility access")
 
-                    Text("Switch on **TeamsMusicStatus** in the list that opens. "
-                         + "This window updates by itself once you do.")
+                    Text(.init("Switch on **TeamsMusicStatus** in the list that opens. "
+                               + "This window updates by itself once you do."))
                         .font(.caption).foregroundStyle(.tertiary)
                         .fixedSize(horizontal: false, vertical: true)
                 }
@@ -220,8 +220,12 @@ struct OnboardingView: View {
         VStack(alignment: .leading, spacing: 12) {
             HStack(spacing: 8) {
                 Image(systemName: "menubar.arrow.up.rectangle").foregroundStyle(.secondary)
-                Text("Teams Music Status lives in your menu bar — look for the "
-                     + "\(Image(systemName: "music.note")) icon. It has no Dock icon.")
+                // Concatenate Text values rather than interpolating an Image into a
+                // String: `"\(Image(...))"` stringifies the SwiftUI value and literally
+                // renders "Image(provider: SwiftUI.ImageProviderBox<...>)" on screen.
+                (Text("Teams Music Status lives in your menu bar — look for the ")
+                 + Text(Image(systemName: "music.note"))
+                 + Text(" icon. It has no Dock icon."))
                     .font(.caption).foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
@@ -323,18 +327,52 @@ final class OnboardingWindowController: NSObject, NSWindowDelegate {
         window.styleMask = [.titled, .closable]
         window.isReleasedWhenClosed = false
         window.delegate = self
-        window.center()
+        centerOnMainScreen(window)
         self.window = window
         bringToFront(window)
+    }
+
+    /// Put the setup window on the screen with the menu bar.
+    ///
+    /// `NSWindow.center()` uses whichever screen macOS considers main at that instant,
+    /// which on a multi-display Mac is not necessarily the one the user is looking at —
+    /// measured here opening at y = -1415, i.e. on a display above the primary. For a
+    /// window whose whole job is to be noticed on first launch, that is a failure.
+    private func centerOnMainScreen(_ window: NSWindow) {
+        guard let screen = NSScreen.screens.first(where: { $0.frame.origin == .zero })
+            ?? NSScreen.main ?? NSScreen.screens.first else {
+            window.center()
+            return
+        }
+        let visible = screen.visibleFrame
+        let size = window.frame.size
+        window.setFrameOrigin(NSPoint(
+            x: visible.midX - size.width / 2,
+            // Slightly above centre reads better than dead centre for a dialog.
+            y: visible.midY - size.height / 2 + visible.height * 0.06
+        ))
     }
 
     private func bringToFront(_ window: NSWindow) {
         // Briefly become a regular app so the setup window can take focus like any other,
         // then drop back to accessory so no Dock icon lingers once it is dismissed.
+        //
+        // The activation MUST happen on a later run-loop turn. Activating in the same
+        // turn as the policy change silently does nothing: measured on a clean first run,
+        // the setup window opened *behind* Microsoft Teams, so a new user would launch
+        // the app and see nothing at all.
         NSApp.setActivationPolicy(.regular)
-        NSApp.activate(ignoringOtherApps: true)
-        window.makeKeyAndOrderFront(nil)
-        window.orderFrontRegardless()
+        DispatchQueue.main.async {
+            NSApp.activate(ignoringOtherApps: true)
+            window.makeKeyAndOrderFront(nil)
+            window.orderFrontRegardless()
+            // Belt and braces: if something else grabs focus in the same moment, a second
+            // pass a beat later still puts the window in front of it.
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
+                NSApp.activate(ignoringOtherApps: true)
+                window.makeKeyAndOrderFront(nil)
+            }
+        }
     }
 
     func close() {

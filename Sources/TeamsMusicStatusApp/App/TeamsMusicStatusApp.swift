@@ -45,7 +45,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // Belt and braces: Info.plist already sets LSUIElement, but running the binary
         // directly (development) would otherwise bounce a Dock icon.
         NSApp.setActivationPolicy(.accessory)
-        Log.app.info("Teams Music Status started")
+        // Recorded at every launch: "does the app hold Accessibility?" is the first
+        // question for any support issue, and the answer is not otherwise visible.
+        Log.app.info("""
+            Teams Music Status started — accessibility granted: \
+            \(TeamsAccessibility.hasAccessibilityPermission, privacy: .public), \
+            Teams running: \(TeamsProcesses.isRunning, privacy: .public)
+            """)
 
         // Show the first-run explainer when onboarding has not been completed, or when
         // the Accessibility grant has since been revoked and nothing can work without it.
