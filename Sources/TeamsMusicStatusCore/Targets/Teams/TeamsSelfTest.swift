@@ -100,12 +100,47 @@ public final class TeamsSelfTest {
         _ = record(TeamsSelectors.editStatusButton, stage: "flyout open", optional: true)
 
         // Stage 3 — open the editor.
-        let entry = TeamsSelectors.editStatusButton.find(in: app) ?? TeamsSelectors.setStatusItem.find(in: app)
-        if let entry {
-            _ = AXActivator.activate(entry, keyboard: keys, timeout: 5, label: "selfTest.statusEntry") {
-                TeamsSelectors.composeBox.find(in: app) != nil
+        //
+        // Navigation failing is NOT the same as a selector being missing, and conflating
+        // them is dangerous: the coordinator disables automation when required selectors
+        // disappear, so a transient failure to open the editor would permanently switch
+        // the product off. Retry with recovery, and if the editor still will not open,
+        // report exactly that rather than blaming the controls inside it.
+        var editorOpened = false
+        for attempt in 1...3 {
+            let entry = TeamsSelectors.editStatusButton.find(in: app)
+                ?? TeamsSelectors.setStatusItem.find(in: app)
+            if let entry {
+                let outcome = AXActivator.activate(entry, keyboard: keys, timeout: 5,
+                                                   label: "selfTest.statusEntry") {
+                    TeamsSelectors.composeBox.find(in: app) != nil
+                }
+                if outcome.didSucceed { editorOpened = true; break }
+            }
+            guard attempt < 3 else { break }
+            Log.selfTest.info("could not open the status editor (attempt \(attempt, privacy: .public)); recovering")
+            keys.send(.escape)
+            try? accessibility.ensureHealthy()
+            accessibility.raiseWindowsWithoutActivating()
+            // Re-open the flyout, which Escape just closed.
+            if let button = TeamsSelectors.profileButton.find(in: app) {
+                _ = AXActivator.activate(button, keyboard: keys, timeout: 5, label: "selfTest.reopenFlyout") {
+                    TeamsSelectors.statusReadout.find(in: app) != nil
+                        || TeamsSelectors.setStatusItem.find(in: app) != nil
+                }
             }
         }
+
+        guard editorOpened else {
+            entries.append(.init(selector: "statusEditorNavigation",
+                                 description: "the status editor could not be opened after 3 attempts — "
+                                            + "navigation problem, not necessarily a changed selector",
+                                 stage: "opening editor", found: false, optional: false))
+            let report = SelectorSelfTestReport(teamsVersion: version, entries: entries, startedAt: startedAt)
+            Log.selfTest.error("selector self-test could not reach the status editor")
+            return report
+        }
+
         for selector in TeamsSelectors.editorSelectors {
             _ = record(selector, stage: "editor open",
                        optional: selector.name == "characterCounter")

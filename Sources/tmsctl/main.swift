@@ -113,6 +113,76 @@ case "clear":
     do { try target.clearStatus(); print("✓ cleared") }
     catch { print("✗ \(error.localizedDescription)"); exit(1) }
 
+case "spotify-config":
+    // Where the client ID is (or isn't) coming from, without printing it.
+    let clientID = AppConfiguration.spotifyClientID
+    print("client ID: \(clientID.map { "found (\($0.count) chars)" } ?? "NOT CONFIGURED")")
+    print("redirect:  \(AppConfiguration.spotifyRedirectURI.absoluteString)")
+    print("bundle:    \(Bundle.main.bundleIdentifier ?? "<none>")")
+    if let problem = clientID == nil ? AppConfiguration.missingClientIDMessage : nil {
+        print("\n\(problem)")
+    }
+
+case "connect":
+    // Same PKCE flow the app uses, run where its errors are visible.
+    guard let clientID = AppConfiguration.spotifyClientID else {
+        print("✗ \(AppConfiguration.missingClientIDMessage)")
+        exit(2)
+    }
+    let auth = SpotifyAuth(configuration: .init(clientID: clientID,
+                                                redirectURI: AppConfiguration.spotifyRedirectURI))
+    print("opening the Spotify consent page…")
+    let semaphore = DispatchSemaphore(value: 0)
+    var failure: Error?
+    Task {
+        do { try await auth.authorize() } catch { failure = error }
+        semaphore.signal()
+    }
+    _ = semaphore.wait(timeout: .now() + 200)
+    if let failure {
+        print("✗ \(failure.localizedDescription)")
+        exit(1)
+    }
+    print("✓ connected; tokens stored in the Keychain")
+
+case "spotify":
+    let useLocal = arguments.contains("--local")
+    let source: PresenceSource
+    if useLocal {
+        source = SpotifyLocalSource()
+    } else {
+        guard let clientID = AppConfiguration.spotifyClientID else {
+            print("✗ no client ID configured"); exit(2)
+        }
+        source = SpotifyWebAPISource(
+            auth: SpotifyAuth(configuration: .init(clientID: clientID,
+                                                   redirectURI: AppConfiguration.spotifyRedirectURI)))
+    }
+    printHeader("Spotify — \(source.displayName)")
+    let semaphore = DispatchSemaphore(value: 0)
+    var result: Result<TrackPresence?, Error> = .success(nil)
+    Task {
+        do { result = .success(try await source.fetch()) }
+        catch { result = .failure(error) }
+        semaphore.signal()
+    }
+    _ = semaphore.wait(timeout: .now() + 40)
+    switch result {
+    case .success(let presence):
+        if let presence {
+            print("track:   \(presence.trackName)")
+            print("artists: \(presence.joinedArtists)")
+            print("album:   \(presence.albumName ?? "-")")
+            print("playing: \(presence.isPlaying)")
+            print("render:  \"\(StatusTemplate().render(presence))\"")
+        } else {
+            print("no active playback")
+        }
+    case .failure(let error):
+        print("✗ \(error.localizedDescription)")
+        exit(1)
+    }
+
 case "gate":
     requirePermission()
     GateRunner(accessibility: accessibility, target: target).run(arguments: arguments)

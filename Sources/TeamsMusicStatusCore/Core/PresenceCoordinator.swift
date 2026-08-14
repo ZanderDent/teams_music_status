@@ -364,6 +364,17 @@ public final class PresenceCoordinator: ObservableObject {
             lastSelfTest = report
             if report.passed {
                 tracker.recordSuccess(version: installed)
+                return
+            }
+
+            // Turning automation off is the right response to a genuinely changed Teams
+            // UI, and the wrong response to "we couldn't open the editor just now" —
+            // which happens if Teams is busy or something else is driving it. Only the
+            // former disables the product.
+            let navigationOnly = report.failures.allSatisfy { $0.selector == "statusEditorNavigation" }
+            if navigationOnly {
+                Log.selfTest.warning("self-test could not navigate to the status editor; not disabling sync")
+                state = .recovering
             } else {
                 state = .teamsSelectorsChanged(
                     "Missing: \(report.failures.map(\.selector).joined(separator: ", ")).")
