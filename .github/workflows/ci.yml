@@ -65,9 +65,14 @@ jobs:
             fail=1
           fi
 
-          # Tokens must only ever be logged as a length.
-          if git grep -nI 'accessToken' -- Sources | grep -iE 'Log\.|logger|print\(' ; then
-            echo "::error::an access token may be reachable by a logger; use Redact.secret"
+          # Tokens must only ever reach a logger through Redact.secret, which prints a
+          # length and nothing else. Lines that already go through it are the correct
+          # pattern, not a violation — excluding them is what keeps this check useful
+          # rather than something people learn to ignore.
+          if git grep -nIE 'accessToken|refreshToken|codeVerifier|code_verifier' -- Sources \
+               | grep -iE 'Log\.|logger|print\(' \
+               | grep -v 'Redact\.secret' ; then
+            echo "::error::a credential may reach a logger unredacted; wrap it in Redact.secret"
             fail=1
           fi
 
