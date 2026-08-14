@@ -1,0 +1,93 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+# A fork's pull request gets a read-only token and no secrets. Nothing here needs
+# either, so PRs from strangers run safely.
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-and-test:
+    name: Build and test
+    runs-on: macos-14
+    timeout-minutes: 20
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Show toolchain
+        run: swift --version
+
+      - name: Build
+        run: swift build --build-tests
+
+      - name: Test
+        # The unit tests cover the sync rules, template rendering, Unicode handling and
+        # Spotify parsing. Anything that needs a real Microsoft Teams, real Accessibility
+        # permission or a Spotify account cannot run on a hosted runner — those live in
+        # docs/ACCEPTANCE_TESTS.md and are run by hand before release.
+        run: swift test
+
+  guard:
+    name: Repository hygiene
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: No credentials committed
+        run: |
+          set -euo pipefail
+          fail=0
+
+          # Files that must never be tracked, regardless of .gitignore drift.
+          for forbidden in .env Config/Spotify.plist; do
+            if git ls-files --error-unmatch "$forbidden" >/dev/null 2>&1; then
+              echo "::error file=$forbidden::$forbidden must never be committed"
+              fail=1
+            fi
+          done
+
+          # The app uses OAuth with PKCE and must never reference a client secret.
+          if git grep -nIE 'SPOTIFY_CLIENT_SECRET|client_secret' -- Sources Tests scripts \
+               | grep -vE 'never|not used|no client secret|does not need|without a secret' ; then
+            echo "::error::a client secret is referenced in source; this app uses PKCE and must not use one"
+            fail=1
+          fi
+
+          # Tokens must only ever be logged as a length.
+          if git grep -nI 'accessToken' -- Sources | grep -iE 'Log\.|logger|print\(' ; then
+            echo "::error::an access token may be reachable by a logger; use Redact.secret"
+            fail=1
+          fi
+
+          exit $fail
+
+      - name: No absolute developer paths
+        run: |
+          set -euo pipefail
+          if git grep -nI '/Users/[a-z]' -- Sources Tests scripts docs *.md ; then
+            echo "::error::absolute paths from a developer's machine must not be committed"
+            exit 1
+          fi
+
+      - name: No screen coordinates in the automation
+        # The whole design depends on semantic accessibility selectors. A patch that
+        # reaches for geometry is a regression even if it works.
+        run: |
+          set -euo pipefail
+          if git grep -nE 'kAXPositionAttribute|kAXFrameAttribute|kAXSizeAttribute' \
+               -- Sources/TeamsMusicStatusCore/Targets ; then
+            echo "::error::the Teams automation must not read screen geometry"
+            exit 1
+          fi

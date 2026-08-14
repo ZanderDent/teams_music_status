@@ -33,6 +33,18 @@ verifiers and client secrets must not reach a logger, not even at debug level. U
 **Keep Teams knowledge in one file.** Anything about how the Teams UI is shaped belongs
 in `TeamsSelectors`, with a matching entry in the self-test.
 
+## How changes get merged
+
+`main` is protected. Nobody pushes to it directly, including the maintainer's own work
+going through review where practical:
+
+* fork the repo, branch, and open a pull request;
+* CI must pass — it builds, runs the tests, and fails the build if a credential is
+  committed, an absolute developer path appears, a token becomes reachable by a logger,
+  or the Teams automation starts reading screen geometry;
+* the maintainer (listed in `.github/CODEOWNERS`) must approve;
+* force-pushes and branch deletion are blocked, so history cannot be rewritten or wiped.
+
 ## Before opening a pull request
 
 ```sh

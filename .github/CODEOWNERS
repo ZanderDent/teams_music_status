@@ -1,0 +1,15 @@
+# Every change needs the maintainer's review before it can be merged.
+# Combined with branch protection, this is what stops an outside contributor
+# merging anything on their own.
+*       @ZanderDent
+
+# Extra emphasis on the parts where a mistake is expensive:
+#   - the Teams automation is what touches someone else's application
+#   - the OAuth and Keychain code handles credentials
+#   - the build script controls signing and entitlements
+#   - CI is what enforces all of the above
+/Sources/TeamsMusicStatusCore/Targets/Teams/            @ZanderDent
+/Sources/TeamsMusicStatusCore/Presence/SpotifyWebAPI/   @ZanderDent
+/Sources/TeamsMusicStatusCore/Services/Keychain/        @ZanderDent
+/scripts/                                               @ZanderDent
+/.github/                                               @ZanderDent

@@ -255,9 +255,14 @@ the core.
 
 ---
 
+## Security
+
+See [`SECURITY.md`](SECURITY.md) for what the app can access, what it stores, and how to
+report a vulnerability privately.
+
 ## Contributing
 
-See [`CONTRIBUTING.md`](CONTRIBUTING.md). Bug reports that include the output of
+Pull requests welcome — see [`CONTRIBUTING.md`](CONTRIBUTING.md). Bug reports that include the output of
 `swift run tmsctl selftest` are enormously more useful than ones that don't.
 
 ## License
