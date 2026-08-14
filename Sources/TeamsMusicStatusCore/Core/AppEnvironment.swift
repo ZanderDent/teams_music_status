@@ -62,7 +62,7 @@ public final class AppEnvironment: ObservableObject {
             .sink { [weak self] in self?.coordinator.applySettings() }
             .store(in: &cancellables)
 
-        Log.app.info("AppEnvironment constructed (syncEnabled=\(settings.syncEnabled, privacy: .public))")
+        Log.debug(Log.app, "AppEnvironment constructed (syncEnabled=\(settings.syncEnabled))")
         coordinator.isEnabled = settings.syncEnabled
         coordinator.$isEnabled
             .dropFirst()
