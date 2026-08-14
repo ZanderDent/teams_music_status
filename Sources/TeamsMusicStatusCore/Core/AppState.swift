@@ -13,6 +13,11 @@ public enum AppState: Equatable, Sendable {
     case spotifyPermissionMissing(String)
     case spotifyRateLimited(until: Date)
     case spotifyUnreachable(String)
+    /// Local source only: macOS has not granted permission to control Spotify.
+    /// Distinct from `spotifyPermissionMissing`, which is an OAuth scope problem —
+    /// telling someone to "reconnect Spotify" when they actually need to tick a box in
+    /// System Settings sends them somewhere useless.
+    case spotifyAutomationDenied
 
     case teamsNotRunning
     case teamsAccessibilityPermissionMissing
@@ -34,6 +39,7 @@ public enum AppState: Equatable, Sendable {
         case .spotifyPermissionMissing: return "Spotify permission needed"
         case .spotifyRateLimited: return "Spotify rate limited"
         case .spotifyUnreachable: return "Spotify unreachable"
+        case .spotifyAutomationDenied: return "Can't read Spotify"
         case .teamsNotRunning: return "Teams not running"
         case .teamsAccessibilityPermissionMissing: return "Needs Accessibility permission"
         case .teamsAccessibilityTreeUnavailable: return "Teams interface unavailable"
@@ -63,6 +69,9 @@ public enum AppState: Equatable, Sendable {
             return "Spotify asked us to slow down. Retrying in \(seconds)s."
         case .spotifyUnreachable(let detail):
             return detail
+        case .spotifyAutomationDenied:
+            return "Allow Teams Music Status to control Spotify in System Settings ▸ "
+                 + "Privacy & Security ▸ Automation, or switch to the Spotify Web API source." 
         case .teamsNotRunning:
             return "Start Microsoft Teams to resume syncing."
         case .teamsAccessibilityPermissionMissing:
@@ -90,6 +99,7 @@ public enum AppState: Equatable, Sendable {
              .teamsNotRunning, .teamsAccessibilityTreeUnavailable:
             return .warning
         case .spotifyDisconnected, .spotifyAuthExpired, .spotifyPermissionMissing,
+             .spotifyAutomationDenied,
              .teamsAccessibilityPermissionMissing, .teamsSelectorsChanged:
             return .error
         }

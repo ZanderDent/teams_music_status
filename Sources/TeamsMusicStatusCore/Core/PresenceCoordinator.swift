@@ -153,6 +153,7 @@ public final class PresenceCoordinator: ObservableObject {
         case .noPlayback, .disabled:
             return settings.pollInterval * 3
         case .spotifyDisconnected, .spotifyAuthExpired, .spotifyPermissionMissing,
+             .spotifyAutomationDenied,
              .teamsAccessibilityPermissionMissing, .teamsSelectorsChanged:
             return 30    // needs the user; no point hammering
         case .teamsNotRunning:
@@ -275,6 +276,9 @@ public final class PresenceCoordinator: ObservableObject {
     // MARK: - Error handling
 
     private func handleSourceError(_ error: PresenceSourceError) {
+        // Source failures were previously silent in the logs, which made diagnosing a
+        // stuck integration guesswork.
+        Log.spotify.error("source read failed: \(error.localizedDescription, privacy: .public)")
         switch error {
         case .notAuthorized:
             state = .spotifyDisconnected
@@ -293,7 +297,7 @@ public final class PresenceCoordinator: ObservableObject {
         case .appNotRunning:
             state = .noPlayback
         case .automationPermissionDenied:
-            state = .spotifyPermissionMissing("Automation access to Spotify")
+            state = .spotifyAutomationDenied
         }
     }
 

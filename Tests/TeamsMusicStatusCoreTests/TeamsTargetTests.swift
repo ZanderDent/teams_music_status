@@ -66,6 +66,14 @@ final class AppStateTests: XCTestCase {
         XCTAssertTrue(AppState.teamsAccessibilityPermissionMissing.needsUserAction)
         XCTAssertTrue(AppState.teamsSelectorsChanged("x").needsUserAction)
         XCTAssertTrue(AppState.spotifyAuthExpired.needsUserAction)
+        XCTAssertTrue(AppState.spotifyAutomationDenied.needsUserAction)
+
+        // Automation consent and an OAuth scope problem need different fixes, so they
+        // must not share a message. Sending someone to "reconnect Spotify" when they
+        // need System Settings wastes their time.
+        XCTAssertNotEqual(AppState.spotifyAutomationDenied.detail,
+                          AppState.spotifyPermissionMissing("Automation access to Spotify").detail)
+        XCTAssertEqual(AppState.spotifyAutomationDenied.detail?.contains("Automation"), true)
 
         XCTAssertFalse(AppState.ready.needsUserAction)
         XCTAssertFalse(AppState.noPlayback.needsUserAction)
@@ -81,6 +89,7 @@ final class AppStateTests: XCTestCase {
             .disabled, .ready, .syncing, .noPlayback, .spotifyDisconnected,
             .spotifyAuthExpired, .spotifyPermissionMissing("x"),
             .spotifyRateLimited(until: Date()), .spotifyUnreachable("x"),
+            .spotifyAutomationDenied,
             .teamsNotRunning, .teamsAccessibilityPermissionMissing,
             .teamsAccessibilityTreeUnavailable, .teamsSelectorsChanged("x"),
             .manualOverrideDetected(nil), .recovering,
