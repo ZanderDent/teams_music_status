@@ -85,7 +85,7 @@ public final class SpotifyAuth {
     private var cachedTokens: Tokens?
 
     public init(configuration: Configuration,
-                keychain: KeychainStore = KeychainStore(service: "com.zanderdent.TeamsRichPresence.spotify"),
+                keychain: KeychainStore = KeychainStore(service: "com.zanderdent.TeamsMusicStatus.spotify"),
                 session: URLSession = .shared) {
         self.configuration = configuration
         self.keychain = keychain

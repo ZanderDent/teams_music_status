@@ -1,13 +1,13 @@
 import AppKit
 import SwiftUI
-import TeamsRichPresenceCore
+import TeamsMusicStatusCore
 
 /// Menu-bar-only application.
 ///
 /// `LSUIElement` in Info.plist keeps it out of the Dock and the app switcher; the whole
 /// interface is the `MenuBarExtra` plus a Settings window.
 @main
-struct TeamsRichPresenceApp: App {
+struct TeamsMusicStatusApp: App {
 
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
     @StateObject private var environment = AppEnvironment()
@@ -45,7 +45,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // Belt and braces: Info.plist already sets LSUIElement, but running the binary
         // directly (development) would otherwise bounce a Dock icon.
         NSApp.setActivationPolicy(.accessory)
-        Log.app.info("Teams Rich Presence started")
+        Log.app.info("Teams Music Status started")
 
         // Show the first-run explainer when onboarding has not been completed, or when
         // the Accessibility grant has since been revoked and nothing can work without it.
@@ -70,7 +70,7 @@ struct MenuBarLabel: View {
     var body: some View {
         Image(systemName: symbolName)
             .symbolRenderingMode(.hierarchical)
-            .accessibilityLabel("Teams Rich Presence — \(state.title)")
+            .accessibilityLabel("Teams Music Status — \(state.title)")
     }
 
     private var symbolName: String {

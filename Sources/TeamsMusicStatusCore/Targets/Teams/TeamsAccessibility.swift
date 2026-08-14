@@ -67,7 +67,7 @@ public final class TeamsAccessibility {
     /// can be found", never as "an API returned success".
     private let profileSelector: AXSelector
 
-    private let queue = DispatchQueue(label: "com.zanderdent.TeamsRichPresence.ax", qos: .utility)
+    private let queue = DispatchQueue(label: "com.zanderdent.TeamsMusicStatus.ax", qos: .utility)
 
     // Observer state, only touched on `observerThread`'s run loop or under `observerLock`.
     private let observerLock = NSLock()
@@ -329,7 +329,7 @@ public final class TeamsAccessibility {
             CFRunLoopAddTimer(runLoop, keepAlive, .defaultMode)
             CFRunLoopRun()
         }
-        thread.name = "com.zanderdent.TeamsRichPresence.axobserver"
+        thread.name = "com.zanderdent.TeamsMusicStatus.axobserver"
         thread.qualityOfService = .utility
         thread.start()
         observerLock.lock()

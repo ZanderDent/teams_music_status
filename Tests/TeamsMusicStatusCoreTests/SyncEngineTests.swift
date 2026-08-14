@@ -1,5 +1,5 @@
 import XCTest
-@testable import TeamsRichPresenceCore
+@testable import TeamsMusicStatusCore
 
 /// The behavioural contract of the integration: debounce, pause grace, restore, and the
 /// rule that the user always wins a fight over their own status.

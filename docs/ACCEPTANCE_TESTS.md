@@ -4,7 +4,7 @@ Manual verification against **real** Microsoft Teams and a **real** Spotify acco
 Unit tests (`swift test`) cover the decision logic; this document covers everything that
 can only be proven by driving the actual applications.
 
-Automated where possible: `trpctl gate` runs the Teams window-state matrix unattended and
+Automated where possible: `tmsctl gate` runs the Teams window-state matrix unattended and
 restores your original status afterwards. The rest needs a human.
 
 > These tests change your real Teams status. Note what it says first — every procedure
@@ -15,8 +15,8 @@ restores your original status afterwards. The rest needs a human.
 ## Before you start
 
 ```sh
-swift run trpctl version     # confirm the installed Teams version
-swift run trpctl selftest    # confirm every selector still resolves
+swift run tmsctl version     # confirm the installed Teams version
+swift run tmsctl selftest    # confirm every selector still resolves
 ```
 
 If the self-test fails, stop: the Teams UI has changed and `TeamsSelectors` needs updating
@@ -36,7 +36,7 @@ Record the environment with each run:
 ## A. Hard Gate — Teams automation (automated)
 
 ```sh
-swift run trpctl gate --with-restart
+swift run tmsctl gate --with-restart
 ```
 
 Runs, in order, restoring your original status at the end:
@@ -80,7 +80,7 @@ Omit `--with-restart` to skip case 5 (the disruptive one).
 | C3 | Deny instead | Friendly "sign-in was cancelled" message, no crash. |
 | C4 | Start playback | Track and artists appear in the menu-bar panel within one poll. |
 | C5 | Quit the app, relaunch | Still connected — tokens came from the Keychain. |
-| C6 | `security find-generic-password -s com.zanderdent.TeamsRichPresence.spotify` | An entry exists. Its value is a token, so do not paste it anywhere. |
+| C6 | `security find-generic-password -s com.zanderdent.TeamsMusicStatus.spotify` | An entry exists. Its value is a token, so do not paste it anywhere. |
 | C7 | Play from your **phone**, not this Mac | Menu bar still shows the track (this is what the Web API source is for). |
 | C8 | Disconnect Spotify | State becomes *Spotify not connected*; the Keychain item is gone. |
 | C9 | Turn off Wi-Fi for a poll cycle | State becomes *Spotify unreachable*; app does not crash; recovers when the network returns. |
@@ -155,8 +155,8 @@ Enable **Sync Spotify to Teams** first, and note your original Teams status.
 
 | # | Check | Expected |
 |---|---|---|
-| J1 | `log show --predicate 'subsystem == "com.zanderdent.TeamsRichPresence"' --last 1h` | No token, refresh token, authorization code or PKCE verifier. Only lengths. |
-| J2 | `defaults read com.zanderdent.TeamsRichPresence` | Preferences only — no credentials. |
+| J1 | `log show --predicate 'subsystem == "com.zanderdent.TeamsMusicStatus"' --last 1h` | No token, refresh token, authorization code or PKCE verifier. Only lengths. |
+| J2 | `defaults read com.zanderdent.TeamsMusicStatus` | Preferences only — no credentials. |
 | J3 | `grep -ri "client_secret\|SPOTIFY_CLIENT_SECRET" Sources/` | No matches. |
 | J4 | `git log -p -- .env` | Nothing; `.env` is ignored and never committed. |
 

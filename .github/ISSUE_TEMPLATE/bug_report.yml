@@ -40,14 +40,14 @@ body:
     id: teams
     attributes:
       label: Microsoft Teams version
-      description: "`swift run trpctl version`, or Teams ▸ Settings ▸ About"
+      description: "`swift run tmsctl version`, or Teams ▸ Settings ▸ About"
     validations:
       required: true
 
   - type: input
     id: app-version
     attributes:
-      label: Teams Rich Presence version or commit
+      label: Teams Music Status version or commit
     validations:
       required: true
 
@@ -69,14 +69,14 @@ body:
       description: |
         Output of these three commands. They contain no credentials.
       value: |
-        <details><summary>trpctl output</summary>
+        <details><summary>tmsctl output</summary>
 
         ```
-        $ swift run trpctl version
+        $ swift run tmsctl version
 
-        $ swift run trpctl health
+        $ swift run tmsctl health
 
-        $ swift run trpctl selftest
+        $ swift run tmsctl selftest
 
         ```
         </details>
@@ -88,7 +88,7 @@ body:
     attributes:
       label: Logs (optional)
       description: |
-        `log show --predicate 'subsystem == "com.zanderdent.TeamsRichPresence"' --last 30m --style compact`
+        `log show --predicate 'subsystem == "com.zanderdent.TeamsMusicStatus"' --last 30m --style compact`
 
         Please read them first — they include your status text, which may be personal.
         They do not include tokens.

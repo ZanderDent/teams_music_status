@@ -1,5 +1,5 @@
 import SwiftUI
-import TeamsRichPresenceCore
+import TeamsMusicStatusCore
 
 struct SettingsView: View {
     var body: some View {
@@ -163,7 +163,7 @@ struct PermissionsTab: View {
                           systemImage: hasAccessibility ? "checkmark.circle.fill" : "xmark.circle.fill")
                         .foregroundStyle(hasAccessibility ? .green : .red)
                 }
-                Text("Required. Teams Rich Presence uses the macOS Accessibility API to open "
+                Text("Required. Teams Music Status uses the macOS Accessibility API to open "
                      + "your Teams profile menu and type your status, exactly as you would. "
                      + "It never reads your messages.")
                     .font(.caption)

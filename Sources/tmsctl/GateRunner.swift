@@ -1,6 +1,6 @@
 import AppKit
 import Foundation
-import TeamsRichPresenceCore
+import TeamsMusicStatusCore
 
 /// Hard Gate 0 acceptance matrix.
 ///
@@ -8,7 +8,7 @@ import TeamsRichPresenceCore
 /// every window state the product must survive — and that the user's frontmost
 /// application is never disturbed.
 ///
-/// Run with `trpctl gate`. Add `--with-restart` to include the (disruptive) Teams
+/// Run with `tmsctl gate`. Add `--with-restart` to include the (disruptive) Teams
 /// quit/relaunch case.
 struct GateRunner {
     let accessibility: TeamsAccessibility

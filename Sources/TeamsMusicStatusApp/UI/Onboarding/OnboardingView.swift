@@ -1,6 +1,6 @@
 import AppKit
 import SwiftUI
-import TeamsRichPresenceCore
+import TeamsMusicStatusCore
 
 /// First-run explainer.
 ///
@@ -20,7 +20,7 @@ struct OnboardingView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 18) {
             VStack(alignment: .leading, spacing: 6) {
-                Text("Teams Rich Presence")
+                Text("Teams Music Status")
                     .font(.title2.weight(.semibold))
                 Text("Shows what you're listening to as your Microsoft Teams status.")
                     .foregroundStyle(.secondary)
@@ -140,7 +140,7 @@ final class OnboardingWindowController {
                 .environmentObject(environment.settings)
         )
         let window = NSWindow(contentViewController: controller)
-        window.title = "Welcome to Teams Rich Presence"
+        window.title = "Welcome to Teams Music Status"
         window.styleMask = [.titled, .closable]
         window.isReleasedWhenClosed = false
         window.center()

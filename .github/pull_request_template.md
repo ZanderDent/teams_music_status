@@ -10,8 +10,8 @@
 
 ```
 $ swift test
-$ swift run trpctl selftest
-$ swift run trpctl gate
+$ swift run tmsctl selftest
+$ swift run tmsctl gate
 ```
 
 <!-- Paste the gate result line, including whether focus was preserved. -->

@@ -1,5 +1,5 @@
 import XCTest
-@testable import TeamsRichPresenceCore
+@testable import TeamsMusicStatusCore
 
 /// Spotify wire-format parsing and — the part that actually bites — error classification.
 final class SpotifyWebAPITests: XCTestCase {

@@ -1,21 +1,21 @@
 import AppKit
 import Foundation
-import TeamsRichPresenceCore
+import TeamsMusicStatusCore
 
-// trpctl — diagnostics and acceptance harness.
+// tmsctl — diagnostics and acceptance harness.
 //
 // Drives the *production* Core code from a terminal so the Teams automation can be
 // exercised and verified without the GUI. This is the tool the acceptance runs use.
 //
-//   trpctl health              report Teams accessibility health
-//   trpctl enable              run the accessibility enabler, report before/after
-//   trpctl selftest            validate every Teams selector
-//   trpctl get                 read the current Teams status message
-//   trpctl set "<text>"        write a status message and verify it
-//   trpctl clear               delete the status message
-//   trpctl gate                run the full Hard Gate 0 acceptance matrix
-//   trpctl spotify             read the currently-playing track from the chosen source
-//   trpctl version             installed Teams version
+//   tmsctl health              report Teams accessibility health
+//   tmsctl enable              run the accessibility enabler, report before/after
+//   tmsctl selftest            validate every Teams selector
+//   tmsctl get                 read the current Teams status message
+//   tmsctl set "<text>"        write a status message and verify it
+//   tmsctl clear               delete the status message
+//   tmsctl gate                run the full Hard Gate 0 acceptance matrix
+//   tmsctl spotify             read the currently-playing track from the chosen source
+//   tmsctl version             installed Teams version
 
 // Long acceptance runs are watched from a file; block buffering would hide all
 // progress until exit.
@@ -94,7 +94,7 @@ case "get":
 
 case "set":
     requirePermission()
-    guard arguments.count > 1 else { print("usage: trpctl set \"<text>\""); exit(2) }
+    guard arguments.count > 1 else { print("usage: tmsctl set \"<text>\""); exit(2) }
     let before = frontmostAppName()
     do {
         try target.apply(status: arguments[1])
@@ -119,7 +119,7 @@ case "gate":
 
 default:
     print("""
-    trpctl — Teams Rich Presence diagnostics
+    tmsctl — Teams Music Status diagnostics
 
       health      Teams accessibility health
       enable      run the accessibility enabler

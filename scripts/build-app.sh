@@ -1,6 +1,6 @@
 #!/bin/bash
 #
-# build-app.sh — assemble and sign TeamsRichPresence.app from the SwiftPM build.
+# build-app.sh — assemble and sign TeamsMusicStatus.app from the SwiftPM build.
 #
 # SwiftPM produces a bare executable; macOS needs a bundle for LSUIElement, for
 # SMAppService launch-at-login, and — most importantly — so TCC can attribute the
@@ -28,8 +28,8 @@ for arg in "$@"; do
   esac
 done
 
-APP_NAME="TeamsRichPresence"
-BUNDLE_ID="com.zanderdent.TeamsRichPresence"
+APP_NAME="TeamsMusicStatus"
+BUNDLE_ID="com.zanderdent.TeamsMusicStatus"
 VERSION="0.1.0"
 BUILD_NUMBER="$(git rev-list --count HEAD 2>/dev/null || echo 1)"
 
@@ -49,8 +49,8 @@ cat > "$APP_DIR/Contents/Info.plist" <<PLIST
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-    <key>CFBundleName</key><string>Teams Rich Presence</string>
-    <key>CFBundleDisplayName</key><string>Teams Rich Presence</string>
+    <key>CFBundleName</key><string>Teams Music Status</string>
+    <key>CFBundleDisplayName</key><string>Teams Music Status</string>
     <key>CFBundleExecutable</key><string>$APP_NAME</string>
     <key>CFBundleIdentifier</key><string>$BUNDLE_ID</string>
     <key>CFBundlePackageType</key><string>APPL</string>
@@ -64,7 +64,7 @@ cat > "$APP_DIR/Contents/Info.plist" <<PLIST
     <!-- Shown in the macOS Automation consent prompt, which the Local Spotify
          source triggers. Users deserve to know why an app wants this. -->
     <key>NSAppleEventsUsageDescription</key>
-    <string>Teams Rich Presence reads the currently playing track from the Spotify app on this Mac, and can reopen a closed Microsoft Teams window so your status can be updated.</string>
+    <string>Teams Music Status reads the currently playing track from the Spotify app on this Mac, and can reopen a closed Microsoft Teams window so your status can be updated.</string>
 
     <!-- Spotify client IDs are public by design for PKCE desktop apps. Overridden by
          the SPOTIFY_CLIENT_ID environment variable during development. -->

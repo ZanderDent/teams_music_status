@@ -1,4 +1,4 @@
-# Teams Rich Presence
+# Teams Music Status
 
 Discord-style rich presence for Microsoft Teams on macOS. It shows what you're listening
 to as your Teams custom status message:
@@ -74,7 +74,7 @@ export SPOTIFY_CLIENT_ID=your_client_id_here
 ./scripts/build-app.sh --run
 ```
 
-That builds the SwiftPM executable, wraps it in `TeamsRichPresence.app`, signs it, and
+That builds the SwiftPM executable, wraps it in `TeamsMusicStatus.app`, signs it, and
 launches it. The app appears in the menu bar.
 
 For a faster inner loop you can also work with the package directly:
@@ -82,7 +82,7 @@ For a faster inner loop you can also work with the package directly:
 ```sh
 swift build           # compile
 swift test            # unit tests (no Teams or Spotify needed)
-swift run trpctl      # diagnostics CLI, see below
+swift run tmsctl      # diagnostics CLI, see below
 ```
 
 ### 3. Grant permissions
@@ -98,22 +98,22 @@ code signature, so re-signing ad hoc makes you re-grant permission on every buil
 
 ---
 
-## `trpctl` — the diagnostics CLI
+## `tmsctl` — the diagnostics CLI
 
 The same production code, drivable from a terminal. Useful when something is not working
 and you want to know exactly which step failed.
 
 ```sh
-swift run trpctl health      # is Teams automatable right now, and if not, why
-swift run trpctl enable      # run the accessibility enabler and report before/after
-swift run trpctl selftest    # check every Teams selector still resolves
-swift run trpctl get         # read the current Teams status message
-swift run trpctl set "♪ Test"  # write one, and verify it landed
-swift run trpctl gate        # the full acceptance matrix (add --with-restart)
-swift run trpctl version     # installed Teams version
+swift run tmsctl health      # is Teams automatable right now, and if not, why
+swift run tmsctl enable      # run the accessibility enabler and report before/after
+swift run tmsctl selftest    # check every Teams selector still resolves
+swift run tmsctl get         # read the current Teams status message
+swift run tmsctl set "♪ Test"  # write one, and verify it landed
+swift run tmsctl gate        # the full acceptance matrix (add --with-restart)
+swift run tmsctl version     # installed Teams version
 ```
 
-`trpctl gate` is the acceptance harness described in
+`tmsctl gate` is the acceptance harness described in
 [`docs/ACCEPTANCE_TESTS.md`](docs/ACCEPTANCE_TESTS.md). It changes your real Teams status
 and puts it back afterwards.
 
@@ -123,7 +123,7 @@ and puts it back afterwards.
 
 ### Accessibility — required
 
-Teams Rich Presence uses the macOS Accessibility API to open your Teams profile menu and
+Teams Music Status uses the macOS Accessibility API to open your Teams profile menu and
 type your status, exactly as you would.
 
 It does **not** read your Teams messages, and it does **not** capture your keyboard.
@@ -243,7 +243,7 @@ the core.
 ## Contributing
 
 See [`CONTRIBUTING.md`](CONTRIBUTING.md). Bug reports that include the output of
-`swift run trpctl selftest` are enormously more useful than ones that don't.
+`swift run tmsctl selftest` are enormously more useful than ones that don't.
 
 ## License
 

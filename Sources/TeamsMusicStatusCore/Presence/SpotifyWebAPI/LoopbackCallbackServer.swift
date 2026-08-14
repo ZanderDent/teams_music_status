@@ -118,7 +118,7 @@ public final class LoopbackCallbackServer {
         respond(connection,
                 status: "200 OK",
                 body: succeeded
-                    ? "Spotify connected. You can close this tab and return to Teams Rich Presence."
+                    ? "Spotify connected. You can close this tab and return to Teams Music Status."
                     : "Sign-in was not completed. You can close this tab and try again.",
                 isHTML: true)
         finish(with: .success(values))
@@ -126,9 +126,9 @@ public final class LoopbackCallbackServer {
 
     private func respond(_ connection: NWConnection, status: String, body: String, isHTML: Bool = false) {
         let html = """
-        <!doctype html><html><head><meta charset="utf-8"><title>Teams Rich Presence</title></head>\
+        <!doctype html><html><head><meta charset="utf-8"><title>Teams Music Status</title></head>\
         <body style="font:16px -apple-system,system-ui,sans-serif;padding:3rem;color:#1d1d1f">\
-        <h2 style="font-weight:600">Teams Rich Presence</h2><p>\(body)</p></body></html>
+        <h2 style="font-weight:600">Teams Music Status</h2><p>\(body)</p></body></html>
         """
         let payload = isHTML ? html : body
         let response = """

@@ -8,7 +8,7 @@ import os
 /// a logger, not even at debug level, and not even as `.private`. The only permitted
 /// representation of a secret is its length, via `Redact.secret(_:)`.
 public enum Log {
-    public static let subsystem = "com.zanderdent.TeamsRichPresence"
+    public static let subsystem = "com.zanderdent.TeamsMusicStatus"
 
     public static let teams = Logger(subsystem: subsystem, category: "teams")
     public static let accessibility = Logger(subsystem: subsystem, category: "accessibility")
@@ -20,10 +20,10 @@ public enum Log {
     public static let selfTest = Logger(subsystem: subsystem, category: "selftest")
 
     /// Verbose diagnostics for development. Off unless the user opts in.
-    /// `defaults write com.zanderdent.TeamsRichPresence debugLogging -bool YES`
-    /// or run with `TRP_DEBUG=1`.
+    /// `defaults write com.zanderdent.TeamsMusicStatus debugLogging -bool YES`
+    /// or run with `TMS_DEBUG=1`.
     public static var isDebugEnabled: Bool = {
-        if ProcessInfo.processInfo.environment["TRP_DEBUG"] == "1" { return true }
+        if ProcessInfo.processInfo.environment["TMS_DEBUG"] == "1" { return true }
         return UserDefaults.standard.bool(forKey: "debugLogging")
     }()
 

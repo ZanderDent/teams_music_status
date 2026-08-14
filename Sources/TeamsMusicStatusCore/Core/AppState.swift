@@ -66,7 +66,7 @@ public enum AppState: Equatable, Sendable {
         case .teamsNotRunning:
             return "Start Microsoft Teams to resume syncing."
         case .teamsAccessibilityPermissionMissing:
-            return "Teams Rich Presence needs Accessibility permission to update your status."
+            return "Teams Music Status needs Accessibility permission to update your status."
         case .teamsAccessibilityTreeUnavailable:
             return "Teams is running but is not exposing its interface. Trying to recover."
         case .teamsSelectorsChanged(let detail):

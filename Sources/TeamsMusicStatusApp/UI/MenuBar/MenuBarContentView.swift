@@ -1,5 +1,5 @@
 import SwiftUI
-import TeamsRichPresenceCore
+import TeamsMusicStatusCore
 
 /// The menu-bar panel: current state, what Teams is showing, and the controls people
 /// actually reach for. Anything more configurable lives in Settings.
@@ -52,7 +52,7 @@ struct MenuBarContentView: View {
     private var header: some View {
         HStack(alignment: .firstTextBaseline, spacing: 8) {
             VStack(alignment: .leading, spacing: 2) {
-                Text("Teams Rich Presence")
+                Text("Teams Music Status")
                     .font(.headline)
                 HStack(spacing: 5) {
                     Circle()

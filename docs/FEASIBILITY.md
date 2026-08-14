@@ -1,5 +1,18 @@
 # Teams Rich Presence — Feasibility Report
 
+> **Naming note (added in Phase 1):** the project was later renamed to
+> **Teams Music Status**. This report is left exactly as written during Phase 0 — it is
+> the historical record of what was measured and when, and the `spikes/` code it refers
+> to still uses the original name.
+>
+> Two Phase 0 conclusions were **corrected by later measurement**; see
+> `docs/ARCHITECTURE.md` for the current understanding:
+> * §2.7 attributed the unreadable "Show when people message me" checkbox to a "degraded"
+>   force-enabled tree. It is not: Teams does not expose that checkbox's state at all,
+>   and this reproduces on a fully healthy tree.
+> * §2.6 left the accessibility enabler unisolated. It is now understood and deterministic
+>   — the WebView helper walk must *read attributes*, not merely count children.
+
 **Phase:** investigation only. No production application was built.
 **Date of evidence:** 14 August 2026
 **Machine:** the MacBook Pro described in §1. Every claim below was observed on that machine unless explicitly marked otherwise.

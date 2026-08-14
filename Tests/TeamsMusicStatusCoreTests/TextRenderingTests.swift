@@ -1,5 +1,5 @@
 import XCTest
-@testable import TeamsRichPresenceCore
+@testable import TeamsMusicStatusCore
 
 /// Template rendering, Unicode sanitisation and the 280-character clamp.
 final class TextRenderingTests: XCTestCase {

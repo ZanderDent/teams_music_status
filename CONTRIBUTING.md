@@ -24,7 +24,7 @@ directly.
 
 **Never steal focus.** Key events go to the Teams pid via `CGEvent.postToPid`. Window
 repair uses non-activating APIs. If you add an interaction, prove the frontmost app is
-unchanged — `trpctl gate` asserts this for you.
+unchanged — `tmsctl gate` asserts this for you.
 
 **Never log a secret.** Access tokens, refresh tokens, authorization codes, PKCE
 verifiers and client secrets must not reach a logger, not even at debug level. Use
@@ -37,14 +37,14 @@ in `TeamsSelectors`, with a matching entry in the self-test.
 
 ```sh
 swift test                              # unit tests must pass
-swift run trpctl selftest               # selectors still resolve
-swift run trpctl gate                   # Teams automation still works end to end
+swift run tmsctl selftest               # selectors still resolve
+swift run tmsctl gate                   # Teams automation still works end to end
 ```
 
 Include in the description:
 
 * the macOS and Teams versions you tested on;
-* the `trpctl gate` result line;
+* the `tmsctl gate` result line;
 * which sections of `docs/ACCEPTANCE_TESTS.md` you ran, if you touched sync behaviour.
 
 ## Reporting a bug
@@ -52,9 +52,9 @@ Include in the description:
 Please include:
 
 ```sh
-swift run trpctl version
-swift run trpctl health
-swift run trpctl selftest
+swift run tmsctl version
+swift run tmsctl health
+swift run tmsctl selftest
 ```
 
 If Teams updated recently, the self-test output usually identifies the problem outright.
@@ -62,7 +62,7 @@ If Teams updated recently, the self-test output usually identifies the problem o
 For logs:
 
 ```sh
-log show --predicate 'subsystem == "com.zanderdent.TeamsRichPresence"' --last 30m --style compact
+log show --predicate 'subsystem == "com.zanderdent.TeamsMusicStatus"' --last 30m --style compact
 ```
 
 Read them before pasting — they contain your status text, which may be personal. They do
@@ -70,7 +70,7 @@ not contain credentials.
 
 ## Adding a new presence source
 
-1. Conform to `PresenceSource` in `Sources/TeamsRichPresenceCore/Presence/<Name>/`.
+1. Conform to `PresenceSource` in `Sources/TeamsMusicStatusCore/Presence/<Name>/`.
 2. Add a case to `PresenceSourceKind` with a `displayName` and an honest `summary`,
    including its limitations.
 3. Wire it in `AppEnvironment`.

@@ -1,6 +1,6 @@
 # Architecture
 
-How Teams Rich Presence is put together, and why. Findings that shaped these decisions
+How Teams Music Status is put together, and why. Findings that shaped these decisions
 are in [`FEASIBILITY.md`](FEASIBILITY.md); this document assumes them.
 
 ---
@@ -41,7 +41,7 @@ subdirectories:
 
 ```
 Sources/
-  TeamsRichPresenceCore/          library — everything testable
+  TeamsMusicStatusCore/          library — everything testable
     Core/         PresenceSource, PresenceTarget, SyncEngine,
                   PresenceCoordinator, AppState, AppEnvironment
     Models/       TrackPresence, StatusTemplate
@@ -50,10 +50,10 @@ Sources/
                            TeamsSelectors, TeamsSelfTest, TeamsProcesses)
     Services/     AppSettings, Keychain/, Logging/, LoginItem/
     Utilities/    UnicodeSanitizer
-  TeamsRichPresenceApp/           executable — SwiftUI shell only
+  TeamsMusicStatusApp/           executable — SwiftUI shell only
     App/  UI/MenuBar/  UI/Settings/  UI/Onboarding/
-  trpctl/                         diagnostics + acceptance harness
-Tests/TeamsRichPresenceCoreTests/
+  tmsctl/                         diagnostics + acceptance harness
+Tests/TeamsMusicStatusCoreTests/
 ```
 
 The executable holds no logic worth testing; everything else lives in the library so the
@@ -239,4 +239,4 @@ case: if the app cannot say what is wrong, that is a bug.
 `os.Logger`, one category per subsystem. Tokens, authorization codes and PKCE verifiers
 are never logged; `Redact.secret` renders a length and nothing else, and `Redact.status`
 keeps status text short since it is personal. Verbose diagnostics are opt-in via
-`TRP_DEBUG=1` or the `debugLogging` default.
+`TMS_DEBUG=1` or the `debugLogging` default.
