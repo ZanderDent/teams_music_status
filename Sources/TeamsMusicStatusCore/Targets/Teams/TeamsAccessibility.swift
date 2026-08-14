@@ -440,6 +440,9 @@ public final class TeamsAccessibility {
     /// Order the Teams windows in so Chromium resumes processing input. Does not activate
     /// the application.
     func raiseWindowsWithoutActivating() {
+        // Logged because raising Teams is the most user-visible thing this app does to
+        // someone else's window; if it happens on a normal update, that is a bug.
+        Log.accessibility.info("raising the Teams window (recovery only)")
         guard let pid = TeamsProcesses.pid() else { return }
         guard let windows = AXElement(pid: pid)
             .rawAttribute(kAXWindowsAttribute as String) as? [AXUIElement] else { return }

@@ -22,7 +22,6 @@ public final class TeamsAXTarget: PresenceTarget {
     public let displayName = "Microsoft Teams"
 
     private let accessibility: TeamsAccessibility
-    private let lock = NSRecursiveLock()
 
     /// Clear-duration to request when writing a status. `Never` is the product default.
     public var clearAfter: String = "Never"
@@ -51,8 +50,7 @@ public final class TeamsAXTarget: PresenceTarget {
     }
 
     public func prepare() throws {
-        lock.lock(); defer { lock.unlock() }
-        try accessibility.ensureHealthy()
+        try TeamsUI.exclusive { try accessibility.ensureHealthy() }
     }
 
     public func handleTeamsRestart() {
@@ -78,11 +76,12 @@ public final class TeamsAXTarget: PresenceTarget {
                 Log.teams.warning("\(label, privacy: .public) failed (attempt \(attempt, privacy: .public)): \(error.localizedDescription, privacy: .public); recovering")
                 closeFlyout()
                 try? accessibility.ensureHealthy()
-                // A Teams window that is present, un-throttled in the accessibility tree,
-                // and yet ignoring every activation is almost always an occluded window
-                // whose renderer Chromium has throttled. Ordering it in fixes that, and
-                // does not activate the app.
-                accessibility.raiseWindowsWithoutActivating()
+                // Deliberately NOT raising the Teams window here. AXRaise does not steal
+                // keyboard focus, but it does throw Teams in front of whatever the user
+                // is looking at, and on a retry loop that reads as the app repeatedly
+                // "foregrounding Teams" — reported as such during first-run testing.
+                // Raising is confined to the paths that genuinely need it: restoring a
+                // minimized window, and un-wedging a stale flyout.
             }
         }
         throw lastError ?? PresenceTargetError.activationFailed(control: label)
@@ -100,7 +99,33 @@ public final class TeamsAXTarget: PresenceTarget {
         return AXKeyboard(pid: pid)
     }
 
-    private func find(_ selector: AXSelector) -> AXElement? {
+    /// Subtree to search once the profile flyout is open.
+    ///
+    /// Searching from the application root costs ~650 ms, because the Teams accessibility
+    /// tree is ~4300 nodes and every node needs an IPC round trip for its children plus
+    /// two or three for the predicate. A status write performs fifteen to twenty searches,
+    /// which is where an 11-second update actually went. Every control the editor needs
+    /// lives inside the flyout dialog, so once that is open we search a subtree of a few
+    /// hundred nodes instead of the whole app.
+    private var flyoutScope: AXElement?
+
+    /// Cache the flyout dialog so subsequent lookups are cheap.
+    private func captureFlyoutScope() {
+        guard flyoutScope == nil, let app = try? appElement() else { return }
+        flyoutScope = TeamsSelectors.profileDialog.find(in: app, maxDepth: AXActivator.flyoutSearchDepth)
+    }
+
+    private func releaseFlyoutScope() { flyoutScope = nil }
+
+    /// - Parameter scoped: false for controls that live *outside* the flyout, such as the
+    ///   profile button itself.
+    private func find(_ selector: AXSelector, scoped: Bool = true) -> AXElement? {
+        if scoped, let scope = flyoutScope {
+            if let hit = selector.find(in: scope) { return hit }
+            // The dialog was torn down and rebuilt (Teams re-renders it freely); fall
+            // back to a full search and re-capture.
+            releaseFlyoutScope()
+        }
         guard let app = try? appElement() else { return nil }
         return selector.find(in: app)
     }
@@ -117,18 +142,35 @@ public final class TeamsAXTarget: PresenceTarget {
 
     /// Open the profile flyout if it is not already open.
     private func openProfileFlyout() throws {
-        if find(TeamsSelectors.statusReadout) != nil
-            || find(TeamsSelectors.setStatusItem) != nil
-            || find(TeamsSelectors.composeBox) != nil { return }
+        // One search, not three.
+        //
+        // Searching for an element that is NOT present costs a full walk of the ~4300
+        // node tree (~650 ms each), and the old check asked for three absent elements
+        // before doing anything — two seconds of pure waste on every update. The dialog
+        // sits near the front of the tree, so a depth-first search finds it quickly when
+        // it is there, and its presence answers the same question.
+        captureFlyoutScope()
+        if flyoutScope != nil { return }
 
-        let button = try require(TeamsSelectors.profileButton, stage: "opening the profile menu")
+        guard let app = try? appElement(),
+              let button = TeamsSelectors.profileButton.find(in: app) else {
+            Log.teams.error("selector 'profileButton' not found while opening the profile menu")
+            throw PresenceTargetError.elementNotFound(selector: "profileButton",
+                                                     stage: "opening the profile menu")
+        }
+        // The wait condition is evaluated repeatedly, so it has to be cheap. Asking for
+        // statusReadout OR setStatusItem meant two full-tree walks per poll — and one of
+        // them is always absent, which is the worst case (~650 ms for a complete walk).
+        // The dialog's own presence answers the same question in one search, and it sits
+        // near the front of the tree so a depth-first hit is quick.
         let outcome = AXActivator.activate(button, keyboard: try keyboard(),
-                                           timeout: 5, label: "profileButton") { [self] in
-            find(TeamsSelectors.statusReadout) != nil || find(TeamsSelectors.setStatusItem) != nil
+                                           timeout: 5, label: "profileButton") {
+            TeamsSelectors.profileDialog.find(in: app, maxDepth: AXActivator.flyoutSearchDepth) != nil
         }
         guard outcome.didSucceed else {
             throw PresenceTargetError.activationFailed(control: "profile button")
         }
+        captureFlyoutScope()
     }
 
     /// Open the status editor. Requires the flyout to be open.
@@ -157,10 +199,13 @@ public final class TeamsAXTarget: PresenceTarget {
 
     /// Dismiss the flyout without committing anything further.
     private func closeFlyout() {
+        defer { releaseFlyoutScope() }
         guard let keys = try? keyboard() else { return }
         keys.send(.escape)
-        _ = AXPoll.wait(timeout: 1.5) { [self] in
-            find(TeamsSelectors.composeBox) == nil && find(TeamsSelectors.statusReadout) == nil
+        // Again, one cheap check rather than two expensive absent-element searches.
+        guard let app = try? appElement() else { return }
+        _ = AXPoll.wait(timeout: 1.5) {
+            TeamsSelectors.profileDialog.find(in: app, maxDepth: AXActivator.flyoutSearchDepth) == nil
         }
     }
 
@@ -171,8 +216,9 @@ public final class TeamsAXTarget: PresenceTarget {
     /// Only the first line is the message: Teams appends `"Display until 8:27 AM"` as a
     /// second line whenever a clear duration is active.
     public func readCurrentStatus() throws -> String? {
-        lock.lock(); defer { lock.unlock() }
-        return try withRecovery("read status") { try readCurrentStatusOnce() }
+        try TeamsUI.exclusive {
+            try withRecovery("read status") { try readCurrentStatusOnce() }
+        }
     }
 
     private func readCurrentStatusOnce() throws -> String? {
@@ -199,14 +245,26 @@ public final class TeamsAXTarget: PresenceTarget {
     // MARK: - Writing
 
     public func apply(status: String) throws {
-        lock.lock(); defer { lock.unlock() }
-        try withRecovery("apply status") { try applyOnce(status: status) }
+        try TeamsUI.exclusive {
+            try withRecovery("apply status") { try applyOnce(status: status) }
+        }
+    }
+
+    /// Phase timings, emitted when TMS_DEBUG=1. Latency here is user-visible: it is how
+    /// long the Teams flyout sits open on screen.
+    private func timed<T>(_ label: String, _ body: () throws -> T) rethrows -> T {
+        let started = Date()
+        defer {
+            let ms = Int(Date().timeIntervalSince(started) * 1000)
+            Log.debug(Log.teams, "phase \(label): \(ms)ms")
+        }
+        return try body()
     }
 
     private func applyOnce(status: String) throws {
         lastWarnings = []
 
-        try accessibility.ensureHealthy()
+        try timed("ensureHealthy") { try accessibility.ensureHealthy() }
 
         let sanitized = UnicodeSanitizer.sanitize(status)
         if sanitized.wasModified {
@@ -224,16 +282,16 @@ public final class TeamsAXTarget: PresenceTarget {
         var committed = false
         defer { if !committed { closeFlyout() } }
 
-        try openProfileFlyout()
-        try openStatusEditor()
+        try timed("openFlyout") { try openProfileFlyout() }
+        try timed("openEditor") { try openStatusEditor() }
 
         let compose = try require(TeamsSelectors.composeBox, stage: "locating the status field")
-        try replaceText(in: compose, with: target)
+        try timed("replaceText") { try replaceText(in: compose, with: target) }
 
-        applyShowWhenMessaged()
-        try applyClearAfter()
+        timed("showWhenMessaged") { applyShowWhenMessaged() }
+        try timed("clearAfter") { try applyClearAfter() }
 
-        try commit(expecting: target)
+        try timed("commit") { try commit(expecting: target) }
         committed = true   // commit() closes the flyout itself
     }
 
@@ -253,12 +311,23 @@ public final class TeamsAXTarget: PresenceTarget {
         // private event source latches ⌘ from the select-all.
         keys.send(.a, flags: .maskCommand)
         keys.send(.delete)
-        _ = AXPoll.wait(timeout: 1.5) {
-            let current = self.find(TeamsSelectors.composeBox)?.value ?? ""
-            return current.isEmpty || current == field.placeholder
+        // Wait only briefly for the field to look empty, and treat "reports its own
+        // placeholder text as the value" as empty too.
+        //
+        // On this Teams build AXPlaceholderValue is nil while an emptied CKEditor reports
+        // its prompt text as AXValue, so the old condition could never become true and
+        // burned the full timeout on every single update. Correctness does not depend on
+        // this wait at all — the typed text is verified against the field afterwards.
+        let promptText = field.axDescription ?? field.placeholder
+        _ = AXPoll.wait(timeout: 0.5) {
+            let current = self.find(TeamsSelectors.composeBox)?.value?
+                .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            return current.isEmpty || current == promptText
         }
 
-        for character in text { keys.type(character) }
+        // 6 ms is comfortably above what Chromium needs to keep ordering, and halves
+        // the typing cost of a long track title.
+        for character in text { keys.type(character); Thread.sleep(forTimeInterval: 0.006) }
 
         // Verify the compose box actually holds what we typed before committing.
         let landed = AXPoll.wait(timeout: 3.0) {
@@ -376,8 +445,9 @@ public final class TeamsAXTarget: PresenceTarget {
     // MARK: - Clearing
 
     public func clearStatus() throws {
-        lock.lock(); defer { lock.unlock() }
-        try withRecovery("clear status") { try clearStatusOnce() }
+        try TeamsUI.exclusive {
+            try withRecovery("clear status") { try clearStatusOnce() }
+        }
     }
 
     private func clearStatusOnce() throws {

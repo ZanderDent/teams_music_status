@@ -49,7 +49,20 @@ public final class TeamsSelfTest {
         self.accessibility = accessibility
     }
 
+    /// Returns nil when Teams is already busy being driven by a status write.
+    ///
+    /// A self-test that waits its turn behind a write is pointless — the write proves the
+    /// selectors resolve — and worse, queueing here made both operations fight over the
+    /// flyout and fail.
+    public func runIfIdle() throws -> SelectorSelfTestReport? {
+        try TeamsUI.tryExclusive { try runLocked() }
+    }
+
     public func run() throws -> SelectorSelfTestReport {
+        try TeamsUI.exclusive { try runLocked() }
+    }
+
+    private func runLocked() throws -> SelectorSelfTestReport {
         let startedAt = Date()
         let version = TeamsProcesses.installedVersion()
         try accessibility.ensureHealthy()

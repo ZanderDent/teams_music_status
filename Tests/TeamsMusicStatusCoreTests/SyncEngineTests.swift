@@ -21,38 +21,64 @@ final class SyncEngineTests: XCTestCase {
                          observedTeamsStatus: observed)
     }
 
-    // MARK: Debounce
+    // MARK: Write pacing (leading edge)
 
-    func testWriteIsHeldBackUntilTheCandidateIsStable() {
+    /// The first change after a quiet period must publish straight away. Making every
+    /// change wait out a window on top of the poll interval is what made the app feel
+    /// like it simply was not updating.
+    func testFirstChangePublishesImmediately() {
         let engine = SyncEngine(configuration: .init(debounce: 5, pauseGrace: 300))
         var state = SyncEngine.State()
-        let track = playing()
 
-        // First sighting only arms the debounce.
-        XCTAssertEqual(engine.step(state: &state, input: input(track), now: t0), .doNothing)
-        // Still inside the window.
-        XCTAssertEqual(engine.step(state: &state, input: input(track), now: t0 + 4), .doNothing)
-        // Window elapsed.
-        XCTAssertEqual(engine.step(state: &state, input: input(track), now: t0 + 5),
+        XCTAssertEqual(engine.step(state: &state, input: input(playing()), now: t0),
                        .write("♪ Dreams by Fleetwood Mac"))
+    }
+
+    func testATrackChangeLongAfterTheLastWriteIsImmediate() {
+        let engine = SyncEngine(configuration: .init(debounce: 5, pauseGrace: 300))
+        var state = SyncEngine.State()
+        SyncEngine.recordWrite(state: &state, status: "♪ Dreams by Fleetwood Mac",
+                               previousTeamsStatus: nil, at: t0)
+
+        let next = playing("Rhiannon", id: "track-2")
+        XCTAssertEqual(engine.step(state: &state, input: input(next), now: t0 + 30),
+                       .write("♪ Rhiannon by Fleetwood Mac"))
     }
 
     func testSkippingTracksProducesOneWriteNotMany() {
         let engine = SyncEngine(configuration: .init(debounce: 5, pauseGrace: 300))
         var state = SyncEngine.State()
 
-        // Four rapid skips, each one second apart — the debounce restarts every time.
-        for (index, second) in [0.0, 1, 2, 3].enumerated() {
+        // The first skip publishes at once...
+        XCTAssertEqual(engine.step(state: &state, input: input(playing("Track 0", id: "id-0")), now: t0),
+                       .write("♪ Track 0 by Fleetwood Mac"))
+        SyncEngine.recordWrite(state: &state, status: "♪ Track 0 by Fleetwood Mac",
+                               previousTeamsStatus: nil, at: t0)
+
+        // ...and the next three inside the window are held, not written.
+        for (index, second) in [1.0, 2, 3].enumerated() {
             let action = engine.step(state: &state,
-                                     input: input(playing("Track \(index)", id: "id-\(index)")),
+                                     input: input(playing("Track \(index + 1)", id: "id-\(index + 1)")),
                                      now: t0 + second)
-            XCTAssertEqual(action, .doNothing, "skip \(index) should not write")
+            XCTAssertEqual(action, .doNothing, "skip \(index + 1) should be held back")
         }
-        // Settling on the last one still requires a full quiet window.
+
+        // Once the window passes, only the newest one is written — not a backlog of four.
         let settled = playing("Track 3", id: "id-3")
-        XCTAssertEqual(engine.step(state: &state, input: input(settled), now: t0 + 4), .doNothing)
-        XCTAssertEqual(engine.step(state: &state, input: input(settled), now: t0 + 9),
+        XCTAssertEqual(engine.step(state: &state, input: input(settled), now: t0 + 5),
                        .write("♪ Track 3 by Fleetwood Mac"))
+    }
+
+    func testASecondChangeInsideTheWindowWaits() {
+        let engine = SyncEngine(configuration: .init(debounce: 5, pauseGrace: 300))
+        var state = SyncEngine.State()
+        SyncEngine.recordWrite(state: &state, status: "♪ A by X", previousTeamsStatus: nil, at: t0)
+
+        let next = playing("B", id: "b")
+        XCTAssertEqual(engine.step(state: &state, input: input(next), now: t0 + 1), .doNothing)
+        XCTAssertEqual(engine.step(state: &state, input: input(next), now: t0 + 4.9), .doNothing)
+        XCTAssertEqual(engine.step(state: &state, input: input(next), now: t0 + 5),
+                       .write("♪ B by Fleetwood Mac"))
     }
 
     func testUnchangedStatusIsNeverRewritten() {
@@ -170,10 +196,13 @@ final class SyncEngineTests: XCTestCase {
         let engine = SyncEngine()
         var state = SyncEngine.State()   // lastWrittenByApp == nil
 
+        // Whatever Teams shows before the app has written anything is the user's own
+        // status, not something to react to. The app proceeds to publish normally —
+        // it just must not latch an override.
         let action = engine.step(state: &state,
                                  input: input(playing(), observed: .some("Heads down")),
                                  now: t0)
-        XCTAssertEqual(action, .doNothing)
+        XCTAssertEqual(action, .write("♪ Dreams by Fleetwood Mac"))
         XCTAssertFalse(state.manualOverrideDetected)
     }
 

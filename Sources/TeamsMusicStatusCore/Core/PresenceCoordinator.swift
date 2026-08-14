@@ -41,6 +41,9 @@ public final class PresenceCoordinator: ObservableObject {
     private var teamsObservers: [NSObjectProtocol] = []
     private var knownTeamsPID: pid_t?
     private var consecutiveFailures = 0
+    /// Guards against the menu-bar panel's `.task` starting a second self-test each time
+    /// it re-appears.
+    private var isSelfTesting = false
 
     public init(target: TeamsAXTarget,
                 source: PresenceSource,
@@ -235,7 +238,7 @@ public final class PresenceCoordinator: ObservableObject {
 
                 try await runOffMain { try self.target.apply(status: status) }
                 SyncEngine.recordWrite(state: &engineState, status: status,
-                                       previousTeamsStatus: current)
+                                       previousTeamsStatus: current, at: Date())
                 restoreStore.save(from: engineState)
                 lastWarnings = target.lastWarnings
                 consecutiveFailures = 0
@@ -379,10 +382,17 @@ public final class PresenceCoordinator: ObservableObject {
         let tracker = TeamsVersionTracker()
         let installed = TeamsProcesses.installedVersion()
         guard force || tracker.needsVerification(installed: installed) else { return }
-        guard TeamsProcesses.isRunning else { return }
+        guard TeamsProcesses.isRunning, !isSelfTesting else { return }
+
+        isSelfTesting = true
+        defer { isSelfTesting = false }
 
         do {
-            let report = try await runOffMain { try TeamsSelfTest().run() }
+            // Skip rather than queue if a status write is in flight.
+            guard let report = try await runOffMain({ try TeamsSelfTest().runIfIdle() }) else {
+                Log.selfTest.info("Teams is busy; skipping the self-test for now")
+                return
+            }
             lastSelfTest = report
             if report.passed {
                 tracker.recordSuccess(version: installed)

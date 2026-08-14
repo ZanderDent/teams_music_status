@@ -63,6 +63,21 @@ public final class AppEnvironment: ObservableObject {
             .store(in: &cancellables)
 
         Log.debug(Log.app, "AppEnvironment constructed (syncEnabled=\(settings.syncEnabled))")
+        // Load stored Spotify credentials right after launch, off the main thread.
+        //
+        // This deliberately does NOT live in a view's `.task`: that only fires when the
+        // menu-bar panel is first opened, and a user who never opens it got
+        // "Spotify is not connected" forever while sync sat there doing nothing. It also
+        // cannot go in SpotifyAuth.init, which runs on the main thread during SwiftUI
+        // state construction and hung the app when securityd blocked.
+        Task { [weak self] in
+            guard let self else { return }
+            let auth = self.spotifyAuth
+            await Task.detached(priority: .utility) { auth.primeFromKeychain() }.value
+            self.refreshSpotifyConnection()
+            self.coordinator.refreshSoon()
+        }
+
         coordinator.isEnabled = settings.syncEnabled
         coordinator.$isEnabled
             .dropFirst()
@@ -80,16 +95,11 @@ public final class AppEnvironment: ObservableObject {
     /// Keychain has been read, which deliberately happens after launch (see SpotifyAuth).
     @Published public private(set) var spotifyConnected = false
 
-    /// Run the one-time and on-upgrade checks. Called from the UI's `.task`, so it is
-    /// already off the launch critical path.
+    /// Run the on-upgrade checks. Called from the UI's `.task`, so it is already off the
+    /// launch critical path. Credential loading happens in `init` instead — see there.
     public func performStartupChecks() async {
-        // Keychain first: blocking securityd on the main thread hangs a menu-bar app
-        // outright, so this hops off it explicitly.
-        let auth = spotifyAuth
-        await Task.detached(priority: .utility) { auth.primeFromKeychain() }.value
         refreshSpotifyConnection()
         await coordinator.runSelfTestIfNeeded()
-        coordinator.refreshSoon()
     }
 
     public func refreshSpotifyConnection() {

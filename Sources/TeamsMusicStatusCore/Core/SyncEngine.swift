@@ -9,8 +9,16 @@ import Foundation
 public struct SyncEngine {
 
     public struct Configuration: Equatable, Sendable {
-        /// A candidate status must stay unchanged this long before it is written, so
-        /// skipping through tracks produces one Teams edit rather than ten.
+        /// Minimum gap between two Teams writes.
+        ///
+        /// This is a **leading-edge** limit, not a trailing-edge debounce: the first
+        /// change after a quiet period is written straight away, and only a *second*
+        /// change arriving inside the window has to wait. A track change therefore shows
+        /// up in Teams as soon as it is noticed, while skipping through ten tracks still
+        /// produces one or two edits rather than ten.
+        ///
+        /// The earlier trailing-edge behaviour made every single change wait out the full
+        /// window on top of the poll interval, which felt broken — "nothing is updating".
         public var debounce: TimeInterval
         /// How long playback may stay paused/absent before the user's previous status is
         /// put back. Resuming inside this window causes no Teams churn at all.
@@ -30,9 +38,11 @@ public struct SyncEngine {
         /// The user's status from before the app first wrote anything.
         /// Double optional: `nil` = not captured yet; `.some(nil)` = captured, was empty.
         public var savedUserStatus: String??
-        /// Candidate awaiting the debounce window.
+        /// Candidate held back because a write happened too recently.
         public var pendingCandidate: String?
         public var pendingSince: Date?
+        /// When the last write actually went to Teams. Drives the leading-edge limit.
+        public var lastWriteAt: Date?
         /// When playback stopped or paused; drives the grace period.
         public var idleSince: Date?
         /// Set once a manual edit is seen. Latches until the user clears it.
@@ -123,31 +133,33 @@ public struct SyncEngine {
             return .doNothing
         }
 
-        // New candidate: start the debounce window.
-        if rendered != state.pendingCandidate {
-            state.pendingCandidate = rendered
-            state.pendingSince = now
-            return .doNothing
+        // Leading edge: if nothing was written recently, publish immediately. This is
+        // what makes a track change appear in Teams as soon as it is noticed.
+        let sinceLastWrite = state.lastWriteAt.map { now.timeIntervalSince($0) } ?? .greatestFiniteMagnitude
+        if sinceLastWrite >= configuration.debounce {
+            state.pendingCandidate = nil
+            state.pendingSince = nil
+            return .write(rendered)
         }
 
-        // Same candidate as last tick — has it been stable long enough?
-        let since = state.pendingSince ?? now
-        guard now.timeIntervalSince(since) >= configuration.debounce else { return .doNothing }
-
-        state.pendingCandidate = nil
-        state.pendingSince = nil
-        return .write(rendered)
+        // A write happened very recently, so hold this one until the window passes. Only
+        // the newest candidate survives — skipping five tracks writes the fifth, not all five.
+        state.pendingCandidate = rendered
+        state.pendingSince = state.pendingSince ?? now
+        return .doNothing
     }
 
     /// Record that a write landed. Also captures the user's original status the first
     /// time, which is what makes restore-on-disable possible.
     public static func recordWrite(state: inout State,
                                    status: String,
-                                   previousTeamsStatus: String?) {
+                                   previousTeamsStatus: String?,
+                                   at now: Date = Date()) {
         if state.savedUserStatus == nil {
             state.savedUserStatus = .some(previousTeamsStatus)
         }
         state.lastWrittenByApp = status
+        state.lastWriteAt = now
     }
 
     /// Decide what turning the integration off should do.

@@ -142,8 +142,12 @@ public struct AXSelector: Sendable {
 
     public func matches(_ element: AXElement) -> Bool { predicate(element) }
 
-    public func find(in root: AXElement) -> AXElement? {
-        root.firstDescendant(where: predicate)
+    /// - Parameter maxDepth: how deep to walk. Worth capping for elements whose depth is
+    ///   known: Teams' tree is ~4300 nodes and most of that is chat content far below the
+    ///   chrome, so an uncapped search for an element that is *absent* costs a full walk
+    ///   (~650 ms measured) when a capped one costs a fraction of that.
+    public func find(in root: AXElement, maxDepth: Int = 45) -> AXElement? {
+        root.firstDescendant(maxDepth: maxDepth, where: predicate)
     }
 }
 
@@ -260,6 +264,47 @@ public enum ActivationOutcome: Sendable, Equatable {
 }
 
 public enum AXActivator {
+
+    /// How long to wait for `AXPress` to show an effect before falling back.
+    ///
+    /// Deliberately short. Chromium dispatches the DOM click synchronously, so when
+    /// `AXPress` works at all the UI reacts within milliseconds; waiting the full
+    /// verification timeout only buys dead air. Measured before this was tightened: a
+    /// single status update took **23 seconds**, almost all of it spent waiting for four
+    /// `AXPress` calls that were never going to do anything.
+    private static let pressProbeTimeout: TimeInterval = 0.6
+
+    /// After this many consecutive no-ops, stop trying `AXPress` for the rest of the
+    /// session. On the Teams builds tested it never once worked, so paying even 0.6s per
+    /// control for it is pure latency.
+    private static let pressGiveUpThreshold = 4
+
+    /// Depth of the Teams profile flyout dialog beneath the application element,
+    /// measured at 12 on Teams 26198 (`/0/0/0/1/1/1/0/0/0/0/0/0`). The cap leaves plenty
+    /// of headroom while still pruning the chat and calendar subtrees.
+    public static let flyoutSearchDepth = 18
+
+    private static let pressState = NSLock()
+    nonisolated(unsafe) private static var consecutivePressNoOps = 0
+
+    private static var shouldTryPress: Bool {
+        pressState.lock(); defer { pressState.unlock() }
+        return consecutivePressNoOps < pressGiveUpThreshold
+    }
+
+    private static func recordPressResult(worked: Bool) {
+        pressState.lock(); defer { pressState.unlock() }
+        if worked {
+            consecutivePressNoOps = 0
+        } else {
+            consecutivePressNoOps += 1
+            if consecutivePressNoOps == pressGiveUpThreshold {
+                Log.accessibility.info(
+                    "AXPress has been a no-op \(pressGiveUpThreshold, privacy: .public) times; skipping it from now on")
+            }
+        }
+    }
+
     /// Activate a control and *prove* it did something.
     ///
     /// Phase 0 established that Chromium inside Teams frequently accepts `AXPress`,
@@ -277,11 +322,16 @@ public enum AXActivator {
                                 expecting condition: () -> Bool) -> ActivationOutcome {
         if condition() { return .succeeded(.axPress) }  // already in the desired state
 
-        // 1. AXPress, then verify.
-        if element.performAction() == .success,
-           AXPoll.wait(timeout: timeout, condition) {
-            Log.debug(Log.accessibility, "activate[\(label)]: AXPress worked")
-            return .succeeded(.axPress)
+        // 1. AXPress, then verify — briefly, and only while it is still plausible that
+        //    AXPress does anything on this build.
+        if shouldTryPress {
+            if element.performAction() == .success,
+               AXPoll.wait(timeout: pressProbeTimeout, condition) {
+                recordPressResult(worked: true)
+                Log.debug(Log.accessibility, "activate[\(label)]: AXPress worked")
+                return .succeeded(.axPress)
+            }
+            recordPressResult(worked: false)
         }
 
         // 2. Semantic focus + a real key event, then verify. Still no coordinates.
@@ -292,8 +342,11 @@ public enum AXActivator {
 
         for (key, method) in order {
             element.setFocused(true)
-            // Give the focus ring a moment to land before the key arrives.
-            _ = AXPoll.wait(timeout: 0.6) { element.bool(kAXFocusedAttribute as String) == true }
+            // Focus lands within a frame or two when it lands at all; some Chromium
+            // elements never report AXFocused, in which case a long wait is dead time.
+            _ = AXPoll.wait(timeout: 0.25, interval: 0.03) {
+                element.bool(kAXFocusedAttribute as String) == true
+            }
             keyboard.send(key)
             if AXPoll.wait(timeout: timeout, condition) {
                 Log.accessibility.info(

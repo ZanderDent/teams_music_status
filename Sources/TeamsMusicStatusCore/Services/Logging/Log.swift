@@ -27,10 +27,13 @@ public enum Log {
         return UserDefaults.standard.bool(forKey: "debugLogging")
     }()
 
+    /// Emitted at *info* level rather than debug: os_log discards debug-level messages
+    /// unless the subsystem is specially configured, so they never reached `log show`.
+    /// The whole call is already gated behind `isDebugEnabled`.
     public static func debug(_ logger: Logger, _ message: @autoclosure () -> String) {
         guard isDebugEnabled else { return }
         let rendered = message()
-        logger.debug("\(rendered, privacy: .public)")
+        logger.info("[debug] \(rendered, privacy: .public)")
     }
 }
 

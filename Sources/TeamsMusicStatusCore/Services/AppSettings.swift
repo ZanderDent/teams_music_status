@@ -30,7 +30,7 @@ public final class AppSettings: ObservableObject {
             Key.template: StatusTemplate.defaultTemplate,
             Key.pauseGrace: 300.0,
             Key.debounce: 5.0,
-            Key.pollInterval: 5.0,
+            Key.pollInterval: 3.0,
             Key.syncEnabled: false,
             Key.clearAfter: "Never",
             Key.showWhenMessaged: true,
