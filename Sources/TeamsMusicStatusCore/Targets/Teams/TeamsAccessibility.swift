@@ -200,6 +200,16 @@ public final class TeamsAccessibility {
             || TeamsSelectors.statusReadout.find(in: app) != nil
         guard hasDialog else { return false }
 
+        // Escape has to actually reach the renderer. If the Teams window is occluded,
+        // Chromium throttles it and drops the key event — exactly the failure seen with a
+        // just-un-minimized window. Order the window in first; this does not activate the
+        // app, so focus is still preserved.
+        //
+        // Without this, a flyout left open by an interrupted run wedges the integration
+        // permanently: measured at 275 exposed nodes across 6 repair attempts over 105
+        // seconds, recovering to 4321 the moment the window was raised.
+        raiseWindowsWithoutActivating()
+
         let keyboard = AXKeyboard(pid: pid)
         for _ in 0..<3 {
             keyboard.send(.escape)
