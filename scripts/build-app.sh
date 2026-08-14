@@ -33,6 +33,27 @@ BUNDLE_ID="com.zanderdent.TeamsMusicStatus"
 VERSION="0.1.0"
 BUILD_NUMBER="$(git rev-list --count HEAD 2>/dev/null || echo 1)"
 
+# Spotify client ID. Public by design for a PKCE desktop app, so baking it into the
+# bundle is safe — but it must not be committed, so it is sourced from a git-ignored
+# file rather than from the repository.
+#   1. $SPOTIFY_CLIENT_ID
+#   2. Config/Spotify.plist  (ClientID key)
+#   3. .env                  (SPOTIFY_CLIENT_ID=...)
+CLIENT_ID="${SPOTIFY_CLIENT_ID:-}"
+if [ -z "$CLIENT_ID" ] && [ -f "$ROOT/Config/Spotify.plist" ]; then
+  CLIENT_ID="$(/usr/libexec/PlistBuddy -c 'Print :ClientID' "$ROOT/Config/Spotify.plist" 2>/dev/null || true)"
+fi
+if [ -z "$CLIENT_ID" ] && [ -f "$ROOT/.env" ]; then
+  CLIENT_ID="$(grep -E '^SPOTIFY_CLIENT_ID=' "$ROOT/.env" | head -1 | cut -d= -f2- | tr -d ' \r\"' || true)"
+fi
+if [ -z "$CLIENT_ID" ]; then
+  echo "==> WARNING: no Spotify client ID found."
+  echo "    The app will start, but 'Connect Spotify' will be unavailable."
+  echo "    Set SPOTIFY_CLIENT_ID, or create Config/Spotify.plist with a ClientID key."
+else
+  echo "==> Spotify client ID found (${#CLIENT_ID} chars)"
+fi
+
 echo "==> swift build -c $CONFIG"
 swift build -c "$CONFIG" --product "$APP_NAME"
 BINARY="$(swift build -c "$CONFIG" --product "$APP_NAME" --show-bin-path)/$APP_NAME"
@@ -68,7 +89,7 @@ cat > "$APP_DIR/Contents/Info.plist" <<PLIST
 
     <!-- Spotify client IDs are public by design for PKCE desktop apps. Overridden by
          the SPOTIFY_CLIENT_ID environment variable during development. -->
-    <key>SpotifyClientID</key><string>${SPOTIFY_CLIENT_ID:-}</string>
+    <key>SpotifyClientID</key><string>$CLIENT_ID</string>
 </dict>
 </plist>
 PLIST
