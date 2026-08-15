@@ -77,7 +77,7 @@ PKG_PLATFORM="$(grep -oE '\.macOS\(\.v[0-9]+\)' Package.swift | head -1 | grep -
   || die "Package.swift targets macOS $PKG_PLATFORM but common.sh declares $MIN_MACOS"
 ok "deployment target consistent (macOS $MIN_MACOS)"
 
-[ -f "$ICON_ICNS" ] || die "missing app icon at $ICON_ICNS — run: swift Assets/AppIcon/make-icon.swift Assets/AppIcon && iconutil -c icns Assets/AppIcon/AppIcon.iconset -o $ICON_ICNS"
+[ -f "$ICON_ICNS" ] || die "missing app icon at $ICON_ICNS — run: python3 Assets/AppIcon/make-icon.py && iconutil -c icns Assets/AppIcon/AppIcon.iconset -o $ICON_ICNS"
 ok "app icon present"
 
 [ -f "$ENTITLEMENTS" ] || die "missing entitlements at $ENTITLEMENTS"

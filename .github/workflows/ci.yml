@@ -64,9 +64,12 @@ jobs:
           sudo xcode-select -s "$latest/Contents/Developer"
 
       - name: Build the app icon
+        # Regenerated rather than taken from the committed .icns so a broken generator
+        # is caught here instead of at release time.
         run: |
           set -euo pipefail
-          swift Assets/AppIcon/make-icon.swift Assets/AppIcon
+          python3 -m pip install --quiet --disable-pip-version-check pillow numpy
+          python3 Assets/AppIcon/make-icon.py
           iconutil -c icns Assets/AppIcon/AppIcon.iconset -o Assets/AppIcon/AppIcon.icns
 
       - name: Package (unsigned)
