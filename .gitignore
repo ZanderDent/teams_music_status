@@ -25,3 +25,7 @@ __pycache__/
 /build/
 *.xcodeproj
 Config/Spotify.plist
+
+# Release artifacts
+/dist/
+Assets/AppIcon/AppIcon.iconset/
