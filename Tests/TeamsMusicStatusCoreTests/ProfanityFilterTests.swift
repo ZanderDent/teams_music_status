@@ -158,6 +158,21 @@ final class ProfanityFilterTests: XCTestCase {
                        "Fuck it — Dreams")
     }
 
+    /// The exact track that motivated this feature: it published an expletive to a
+    /// corporate directory. The curly apostrophe matters -- it is what Spotify actually
+    /// returns, and a word-boundary bug there would silently stop masking working.
+    func testTheTrackThatMotivatedThisFeature() {
+        let real = TrackPresence(
+            trackName: "GML (thank fuck it’s the weekend)",
+            artists: ["JACK MARLOW", "Phantom Records"],
+            albumName: nil,
+            isPlaying: true,
+            trackID: "real"
+        )
+        XCTAssertEqual(StatusTemplate().render(real),
+                       "♪ GML (thank f**k it’s the weekend) by JACK MARLOW, Phantom Records")
+    }
+
     func testWouldMaskProfanityReportsAccurately() {
         XCTAssertTrue(StatusTemplate().wouldMaskProfanity(explicit))
         XCTAssertFalse(StatusTemplate().wouldMaskProfanity(StatusTemplate.previewPresence))
