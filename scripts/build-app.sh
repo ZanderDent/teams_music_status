@@ -1,22 +1,24 @@
 #!/bin/bash
 #
-# build-app.sh — assemble and sign TeamsMusicStatus.app from the SwiftPM build.
+# build-app.sh — assemble and sign a DEVELOPMENT TeamsMusicStatus.app.
 #
-# SwiftPM produces a bare executable; macOS needs a bundle for LSUIElement, for
-# SMAppService launch-at-login, and — most importantly — so TCC can attribute the
-# Accessibility grant to a stable identity.
+# For distribution use scripts/release.sh instead: this script makes a debug build,
+# signs with whatever local certificate is handy, and does not notarize.
 #
 #   ./scripts/build-app.sh                 debug build
 #   ./scripts/build-app.sh --release       optimised build
 #   ./scripts/build-app.sh --run           build, then launch
 #
-# Signing: uses the first "Apple Development" identity found, or $CODESIGN_IDENTITY.
+# Version, bundle identity, entitlements and the Spotify client ID all come from
+# scripts/common.sh so this and release.sh cannot drift apart.
+#
+# Signing: uses $CODESIGN_IDENTITY, else the first Apple Development identity.
 # A STABLE identity matters — re-signing ad hoc changes the code requirement and macOS
 # silently drops the Accessibility permission, forcing you to re-grant it every build.
 set -euo pipefail
 
-cd "$(dirname "$0")/.."
-ROOT="$PWD"
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/common.sh"
+cd "$ROOT"
 
 CONFIG="debug"
 RUN=0
@@ -28,24 +30,10 @@ for arg in "$@"; do
   esac
 done
 
-APP_NAME="TeamsMusicStatus"
-BUNDLE_ID="com.zanderdent.TeamsMusicStatus"
-VERSION="0.1.0"
-BUILD_NUMBER="$(git rev-list --count HEAD 2>/dev/null || echo 1)"
+read_version
+resolve_client_id
+APP_NAME="$DEV_APP_NAME"
 
-# Spotify client ID. Public by design for a PKCE desktop app, so baking it into the
-# bundle is safe — but it must not be committed, so it is sourced from a git-ignored
-# file rather than from the repository.
-#   1. $SPOTIFY_CLIENT_ID
-#   2. Config/Spotify.plist  (ClientID key)
-#   3. .env                  (SPOTIFY_CLIENT_ID=...)
-CLIENT_ID="${SPOTIFY_CLIENT_ID:-}"
-if [ -z "$CLIENT_ID" ] && [ -f "$ROOT/Config/Spotify.plist" ]; then
-  CLIENT_ID="$(/usr/libexec/PlistBuddy -c 'Print :ClientID' "$ROOT/Config/Spotify.plist" 2>/dev/null || true)"
-fi
-if [ -z "$CLIENT_ID" ] && [ -f "$ROOT/.env" ]; then
-  CLIENT_ID="$(grep -E '^SPOTIFY_CLIENT_ID=' "$ROOT/.env" | head -1 | cut -d= -f2- | tr -d ' \r\"' || true)"
-fi
 if [ -z "$CLIENT_ID" ]; then
   echo "==> WARNING: no Spotify client ID found."
   echo "    The app will start, but 'Connect Spotify' will be unavailable."
@@ -55,44 +43,18 @@ else
 fi
 
 echo "==> swift build -c $CONFIG"
-swift build -c "$CONFIG" --product "$APP_NAME"
-BINARY="$(swift build -c "$CONFIG" --product "$APP_NAME" --show-bin-path)/$APP_NAME"
+swift build -c "$CONFIG" --product "$EXECUTABLE_NAME"
+BINARY="$(swift build -c "$CONFIG" --product "$EXECUTABLE_NAME" --show-bin-path)/$EXECUTABLE_NAME"
 [ -x "$BINARY" ] || { echo "build produced no binary at $BINARY" >&2; exit 1; }
 
-APP_DIR="$ROOT/build/$APP_NAME.app"
+APP_DIR="$ROOT/build/$APP_NAME"
 echo "==> assembling $APP_DIR"
 rm -rf "$APP_DIR"
 mkdir -p "$APP_DIR/Contents/MacOS" "$APP_DIR/Contents/Resources"
-cp "$BINARY" "$APP_DIR/Contents/MacOS/$APP_NAME"
-
-cat > "$APP_DIR/Contents/Info.plist" <<PLIST
-<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0">
-<dict>
-    <key>CFBundleName</key><string>Teams Music Status</string>
-    <key>CFBundleDisplayName</key><string>Teams Music Status</string>
-    <key>CFBundleExecutable</key><string>$APP_NAME</string>
-    <key>CFBundleIdentifier</key><string>$BUNDLE_ID</string>
-    <key>CFBundlePackageType</key><string>APPL</string>
-    <key>CFBundleShortVersionString</key><string>$VERSION</string>
-    <key>CFBundleVersion</key><string>$BUILD_NUMBER</string>
-    <key>LSMinimumSystemVersion</key><string>14.0</string>
-
-    <!-- Menu-bar only: no Dock icon, no app switcher entry. -->
-    <key>LSUIElement</key><true/>
-
-    <!-- Shown in the macOS Automation consent prompt, which the Local Spotify
-         source triggers. Users deserve to know why an app wants this. -->
-    <key>NSAppleEventsUsageDescription</key>
-    <string>Teams Music Status reads the currently playing track from the Spotify app on this Mac, and can reopen a closed Microsoft Teams window so your status can be updated.</string>
-
-    <!-- Spotify client IDs are public by design for PKCE desktop apps. Overridden by
-         the SPOTIFY_CLIENT_ID environment variable during development. -->
-    <key>SpotifyClientID</key><string>$CLIENT_ID</string>
-</dict>
-</plist>
-PLIST
+cp "$BINARY" "$APP_DIR/Contents/MacOS/$EXECUTABLE_NAME"
+write_info_plist "$APP_DIR/Contents/Info.plist"
+[ -f "$ICON_ICNS" ] && cp "$ICON_ICNS" "$APP_DIR/Contents/Resources/AppIcon.icns"
+printf 'APPL????' > "$APP_DIR/Contents/PkgInfo"
 
 # ---- signing -----------------------------------------------------------------
 #
@@ -116,12 +78,12 @@ fi
 
 if [ -n "$IDENTITY" ]; then
   echo "==> codesign with identity ${IDENTITY:0:8}…"
-  codesign --force --sign "$IDENTITY" --options runtime --timestamp=none --entitlements "$ROOT/scripts/TeamsMusicStatus.entitlements" "$APP_DIR" 2>&1 | sed 's/^/    /'
+  codesign --force --sign "$IDENTITY" --options runtime --timestamp=none --entitlements "$ENTITLEMENTS" "$APP_DIR" 2>&1 | sed 's/^/    /'
 else
   echo "==> no signing identity found; signing ad hoc"
   echo "    NOTE: macOS may drop the Accessibility grant on every rebuild."
   echo "    Set CODESIGN_IDENTITY to a stable certificate to avoid re-granting."
-  codesign --force --sign - --entitlements "$ROOT/scripts/TeamsMusicStatus.entitlements" "$APP_DIR" 2>&1 | sed 's/^/    /'
+  codesign --force --sign - --entitlements "$ENTITLEMENTS" "$APP_DIR" 2>&1 | sed 's/^/    /'
 fi
 
 codesign --verify --verbose=1 "$APP_DIR" 2>&1 | sed 's/^/    /'
@@ -130,7 +92,7 @@ echo "==> built $APP_DIR"
 if [ "$RUN" = "1" ]; then
   echo "==> launching"
   # Kill a previous instance so the new binary is the one holding the menu bar item.
-  pkill -f "$APP_DIR/Contents/MacOS/$APP_NAME" 2>/dev/null || true
+  pkill -f "$APP_DIR/Contents/MacOS/$EXECUTABLE_NAME" 2>/dev/null || true
   sleep 0.5
   open "$APP_DIR"
 fi
