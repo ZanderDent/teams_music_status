@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!--
+	  Copy this file to Config/Spotify.plist and put your own Spotify client ID in.
+	  The easy way:
+
+	      ./scripts/setup-spotify.sh
+
+	  Config/Spotify.plist is git-ignored. This example file is the only one committed.
+
+	  Get a client ID free at https://developer.spotify.com/dashboard:
+	    1. Create an app (any name and description will do)
+	    2. Add this redirect URI, exactly:  http://127.0.0.1:8888/callback
+	    3. Copy the Client ID — a 32-character hex string
+
+	  There is deliberately no ClientSecret key. This app authenticates with OAuth 2.0
+	  using PKCE, which exists so a desktop app does not need a secret, and a secret
+	  shipped inside an app bundle would be extractable in seconds. The client ID is
+	  public by design — it travels in the authorization URL — so embedding it is fine.
+
+	  Never add a client secret here, to .env, or to any file in this repository.
+	-->
+	<key>ClientID</key>
+	<string>REPLACE_WITH_YOUR_SPOTIFY_CLIENT_ID</string>
+</dict>
+</plist>
