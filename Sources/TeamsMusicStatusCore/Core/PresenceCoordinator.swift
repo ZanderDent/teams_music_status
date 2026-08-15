@@ -186,7 +186,9 @@ public final class PresenceCoordinator: ObservableObject {
         }
 
         currentPresence = presence
-        let rendered = presence.map { settings.template.render($0) }
+        let rendered = presence.map {
+            settings.template.render($0, maskProfanity: settings.maskProfanity)
+        }
         renderedStatus = (presence?.isPlaying == true) ? rendered : nil
 
         // 2. Decide.

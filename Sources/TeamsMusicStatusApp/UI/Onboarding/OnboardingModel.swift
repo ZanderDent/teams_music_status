@@ -111,7 +111,9 @@ final class OnboardingModel: ObservableObject {
         sourceCheck = .checking
         do {
             let presence = try await environment.activeSource.fetch()
-            let rendered = presence.map { settings.template.render($0) }
+            let rendered = presence.map {
+                settings.template.render($0, maskProfanity: settings.maskProfanity)
+            }
             sourceCheck = .ready(nowPlaying: presence?.isPlaying == true ? rendered : nil)
         } catch let error as PresenceSourceError {
             sourceCheck = .failed(error.localizedDescription)

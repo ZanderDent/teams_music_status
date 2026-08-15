@@ -93,7 +93,15 @@ struct StatusFormatTab: View {
     @EnvironmentObject private var settings: AppSettings
 
     private var preview: String {
-        settings.template.render(StatusTemplate.previewPresence)
+        settings.template.render(StatusTemplate.previewPresence,
+                                 maskProfanity: settings.maskProfanity)
+    }
+
+    /// A track that actually demonstrates masking, so the toggle's effect is visible
+    /// rather than described. The preview above uses a clean track and would not move.
+    private var maskingExample: String {
+        StatusTemplate().render(StatusTemplate.profanityPreviewPresence,
+                                maskProfanity: settings.maskProfanity)
     }
 
     var body: some View {
@@ -119,6 +127,31 @@ struct StatusFormatTab: View {
                             .foregroundStyle(.secondary)
                     }
                     .font(.callout)
+                }
+            }
+
+            Section("Language") {
+                Toggle("Mask strong language", isOn: $settings.maskProfanity)
+
+                Text("Track and artist names go straight onto a status your whole "
+                     + "organisation can see. With this on, common profanity keeps its "
+                     + "first and last letter and the rest becomes asterisks. Your own "
+                     + "template text is never changed.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                LabeledContent("Example") {
+                    Text(maskingExample)
+                        .font(.callout.monospaced())
+                        .foregroundStyle(settings.maskProfanity ? .secondary : .primary)
+                }
+
+                if !settings.maskProfanity {
+                    Label("Explicit track titles will be posted to Teams as written.",
+                          systemImage: "exclamationmark.triangle")
+                        .font(.caption)
+                        .foregroundStyle(.orange)
                 }
             }
 

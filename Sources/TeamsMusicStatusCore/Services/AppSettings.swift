@@ -19,6 +19,7 @@ public final class AppSettings: ObservableObject {
         static let clearAfter = "clearAfter"
         static let showWhenMessaged = "showWhenMessaged"
         static let hasCompletedOnboarding = "hasCompletedOnboarding"
+        static let maskProfanity = "maskProfanity"
     }
 
     private let defaults: UserDefaults
@@ -35,6 +36,9 @@ public final class AppSettings: ObservableObject {
             Key.clearAfter: "Never",
             Key.showWhenMessaged: true,
             Key.hasCompletedOnboarding: false,
+            // Defaults on. This writes to a work profile visible to an entire
+            // organisation, and a track title is not something the user chose.
+            Key.maskProfanity: true,
         ])
         self.sourceKind = PresenceSourceKind(rawValue: defaults.string(forKey: Key.sourceKind) ?? "")
             ?? .spotifyWebAPI
@@ -46,6 +50,7 @@ public final class AppSettings: ObservableObject {
         self.clearAfter = defaults.string(forKey: Key.clearAfter) ?? "Never"
         self.showWhenMessaged = defaults.bool(forKey: Key.showWhenMessaged)
         self.hasCompletedOnboarding = defaults.bool(forKey: Key.hasCompletedOnboarding)
+        self.maskProfanity = defaults.bool(forKey: Key.maskProfanity)
     }
 
     @Published public var sourceKind: PresenceSourceKind {
@@ -84,6 +89,11 @@ public final class AppSettings: ObservableObject {
 
     @Published public var hasCompletedOnboarding: Bool {
         didSet { defaults.set(hasCompletedOnboarding, forKey: Key.hasCompletedOnboarding) }
+    }
+
+    /// Mask common profanity in track, artist and album names before writing to Teams.
+    @Published public var maskProfanity: Bool {
+        didSet { defaults.set(maskProfanity, forKey: Key.maskProfanity) }
     }
 
     public var syncConfiguration: SyncEngine.Configuration {
