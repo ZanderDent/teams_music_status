@@ -49,6 +49,17 @@ notarized**, and Gatekeeper rejects the result on any Mac other than the one tha
 it. It is a separate mode from `--signed` precisely so a development artifact can never
 be mistaken for, or accidentally published as, a release.
 
+> **A development-signed build publishes the signer's Apple ID email.** An Apple
+> Development certificate's common name is `Apple Development: <apple-id-email> (TEAMID)`,
+> and it is embedded in the signature for anyone who obtains the artifact:
+>
+> ```sh
+> codesign -dvvv "Teams Music Status.app"   # Authority=Apple Development: you@example.com
+> ```
+>
+> A Developer ID certificate carries the *team* name instead. One more reason
+> `--dev-signed` output must never be published.
+
 Do not confuse the three certificate types:
 
 | Certificate | Purpose | Notarizable |
@@ -276,4 +287,6 @@ the working tree is dirty, because that release would not be reproducible from g
 - [ ] `dist/release-info.txt` and the `.sha256` reviewed
 - [ ] `dist/RELEASE_NOTES.md` updated
 - [ ] No secret anywhere in the repo or the bundle
+- [ ] `codesign -dvvv` on the artifact shows a **Developer ID** authority, not
+      `Apple Development: <email>` — the latter publishes the signer's Apple ID
 - [ ] Attach the DMG, the `.sha256` and the notes to a GitHub Release
