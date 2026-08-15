@@ -426,7 +426,11 @@ ok "sha256 $SHA"
 
 SIGN_DESC="unsigned"
 TEAM_ID=""
+# An unsigned bundle carries NO entitlements — they are embedded by codesign. Saying
+# otherwise in the metadata would misrepresent what the artifact can actually do.
+ENTS_DESC="none (unsigned; entitlements are applied at signing)"
 if [ "$MODE" != "unsigned" ]; then
+  ENTS_DESC="$(printf '%s' "$SIGNED_ENTS" | grep -oE 'com\.apple\.security[a-z.\-]*' | paste -sd, - || echo unknown)"
   SIGN_DESC="$(printf '%s' "$CODESIGN_INFO" | grep '^Authority=' | head -1 | cut -d= -f2- || true)"
   TEAM_ID="$(printf '%s' "$CODESIGN_INFO" | grep '^TeamIdentifier=' | cut -d= -f2- || true)"
 fi
@@ -446,7 +450,7 @@ built              : $(date -u '+%Y-%m-%dT%H:%M:%SZ')
 signing identity   : $SIGN_DESC
 team identifier    : ${TEAM_ID:-n/a}
 hardened runtime   : $([ "$MODE" != "unsigned" ] && echo enabled || echo "n/a (unsigned)")
-entitlements       : com.apple.security.automation.apple-events
+entitlements       : $ENTS_DESC
 
 notarization       : $NOTARY_STATUS
 submission id      : ${NOTARY_ID:-n/a}
