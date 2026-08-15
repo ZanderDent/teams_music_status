@@ -42,14 +42,44 @@ No screen coordinates.**
 
 ## Requirements
 
-* macOS 14 or later (Apple silicon or Intel)
+* **macOS 14 (Sonoma) or later** — Apple silicon or Intel
 * Microsoft Teams (the `com.microsoft.teams2` client), signed in
 * Spotify — either an account for the Web API, or the desktop app for the local source
-* Xcode 16 / Swift 6.1 to build
 
 ---
 
-## Local development setup
+## Install
+
+1. Download `Teams-Music-Status-1.0.0-macOS.dmg` from the
+   [latest release](https://github.com/ZanderDent/teams_music_status/releases/latest).
+2. Open the DMG and drag **Teams Music Status** into **Applications**.
+3. Launch it from Applications. It appears in the menu bar as ♪ — there is no Dock icon.
+4. A setup window walks you through the rest:
+   * **Allow Accessibility access** — this is how the app types your Teams status.
+     macOS will open System Settings; switch on *TeamsMusicStatus*. The window ticks
+     itself once you do.
+   * **Connect Spotify** — signs in through your browser, once.
+   * **Microsoft Teams** — confirms Teams is running.
+5. Press **Start Syncing**. Play something, and your Teams status follows.
+
+To verify the download:
+
+```sh
+shasum -a 256 Teams-Music-Status-1.0.0-macOS.dmg
+```
+
+and compare it with the `.sha256` published alongside the DMG.
+
+### Uninstalling
+
+Drag the app to the Trash, or run `./scripts/uninstall.sh` from a clone to also remove
+preferences, Keychain tokens and the permission grants.
+
+---
+
+## Building from source
+
+You only need this if you want to develop the app. Users should use the DMG above.
 
 ### 1. Get a Spotify client ID
 
@@ -78,8 +108,15 @@ export SPOTIFY_CLIENT_ID=your_client_id_here
 ./scripts/build-app.sh --run
 ```
 
-That builds the SwiftPM executable, wraps it in `TeamsMusicStatus.app`, signs it, and
-launches it. The app appears in the menu bar.
+That builds the SwiftPM executable, wraps it in `TeamsMusicStatus.app`, signs it with a
+local development certificate, and launches it. The app appears in the menu bar.
+
+To build a distributable DMG instead, see [`docs/DISTRIBUTION.md`](docs/DISTRIBUTION.md):
+
+```sh
+./scripts/release.sh --notarize     # requires a Developer ID certificate
+./scripts/release.sh --unsigned     # local testing only
+```
 
 For a faster inner loop you can also work with the package directly:
 
@@ -241,14 +278,30 @@ the core.
 * **The Teams profile flyout is briefly visible** during an update (~3 seconds). If Teams
   is on a second monitor you will see it open and close. It is not brought to the front,
   and it never takes keyboard focus.
-* **Not notarized.** You will need to build it yourself for now.
+* **Release signing.** Releases are signed with a Developer ID certificate and notarized
+  by Apple, so they open normally. A build you make yourself is unsigned, and macOS will
+  warn that the developer cannot be verified — right-click the app and choose **Open** to
+  get past it, or build with your own certificate.
 
 ---
 
 ## Privacy and security
 
+This app is local-first by design. Specifically:
+
+* **Microsoft Teams is automated locally**, through the macOS Accessibility API. There is
+  **no Microsoft Graph integration**, no Azure app registration and no admin consent —
+  the app drives the Teams window on your Mac exactly as you would.
+* **Spotify Web API traffic goes from your Mac straight to Spotify.** Nothing proxies it.
+* **Local Spotify mode uses Apple Events** to ask the Spotify app on your Mac what is
+  playing. That never touches the network.
+* **No backend belonging to this project receives anything.** There isn't one.
+* **No analytics and no telemetry**, of any kind.
+
+And:
+
 * **Nothing leaves your Mac** except the Spotify API calls the app makes on your behalf.
-  No telemetry, no analytics, no backend, no account.
+  No account, no sign-up.
 * **Spotify tokens live in the macOS Keychain**, never in files, `UserDefaults`, or logs.
   The only thing ever logged about a token is its length.
 * **No client secret.** OAuth uses PKCE, which exists precisely so a desktop app does not

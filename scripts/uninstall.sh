@@ -22,21 +22,57 @@ cd "$(dirname "$0")/.."
 ROOT="$PWD"
 
 APP_NAME="TeamsMusicStatus"
+# Every place the app can legitimately live. Release DMG installs use the display
+# name in /Applications; development builds use the compact name in build/.
+# Missing these would leave the installed app behind after an "uninstall".
+APP_PATHS=(
+  "/Applications/Teams Music Status.app"
+  "$HOME/Applications/Teams Music Status.app"
+  "/Applications/TeamsMusicStatus.app"
+  "$HOME/Applications/TeamsMusicStatus.app"
+  "$ROOT/build/TeamsMusicStatus.app"
+  "$ROOT/dist/stage/Teams Music Status.app"
+)
 BUNDLE_ID="com.zanderdent.TeamsMusicStatus"
 KEYCHAIN_SERVICE="$BUNDLE_ID.spotify"
 
 KEEP_APP=0
-[ "${1:-}" = "--keep-app" ] && KEEP_APP=1
+ASSUME_YES=0
+for arg in "$@"; do
+  case "$arg" in
+    --keep-app) KEEP_APP=1 ;;
+    -y|--yes)   ASSUME_YES=1 ;;
+    *) echo "unknown option: $arg" >&2; exit 2 ;;
+  esac
+done
+
+# This throws away permissions and credentials, so say so and get consent unless the
+# caller has explicitly opted out of the prompt.
+if [ "$ASSUME_YES" = "0" ]; then
+  echo "This will remove Teams Music Status from this Mac:"
+  echo "  - the application bundle$([ "$KEEP_APP" = "1" ] && echo " (kept: --keep-app)")"
+  echo "  - your preferences (template, source, timings)"
+  echo "  - the Spotify tokens in your Keychain (you will need to sign in again)"
+  echo "  - its Accessibility and Automation permission grants"
+  echo "  - its caches and launch-at-login registration"
+  echo
+  echo "It does NOT change your Microsoft Teams status. Clear that in Teams first if"
+  echo "the app left one behind."
+  echo
+  printf "Continue? [y/N] "
+  read -r reply
+  case "$reply" in [yY]*) ;; *) echo "Cancelled."; exit 0 ;; esac
+fi
 
 step() { printf '\033[1m==>\033[0m %s\n' "$1"; }
 ok()   { printf '    \033[32m✓\033[0m %s\n' "$1"; }
 skip() { printf '    \033[2m·\033[0m %s\n' "$1"; }
 
 step "Quitting $APP_NAME"
-if pgrep -f "$APP_NAME.app/Contents/MacOS/$APP_NAME" >/dev/null 2>&1; then
+if pgrep -f "Contents/MacOS/$APP_NAME" >/dev/null 2>&1; then
   osascript -e "tell application id \"$BUNDLE_ID\" to quit" >/dev/null 2>&1
   sleep 1
-  pkill -f "$APP_NAME.app/Contents/MacOS/$APP_NAME" >/dev/null 2>&1
+  pkill -f "Contents/MacOS/$APP_NAME" >/dev/null 2>&1
   ok "stopped"
 else
   skip "not running"
@@ -53,7 +89,7 @@ step "Revoking permissions"
 # app that has only ever been built and never launched. Register it first, or the reset
 # fails with "No such bundle identifier" and leaves the grants in place.
 LSREGISTER=/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister
-for candidate in "$ROOT/build/$APP_NAME.app" "/Applications/$APP_NAME.app"; do
+for candidate in "${APP_PATHS[@]}"; do
   [ -d "$candidate" ] && "$LSREGISTER" -f "$candidate" >/dev/null 2>&1
 done
 
@@ -68,9 +104,11 @@ tccutil reset AppleEvents "$BUNDLE_ID" >/dev/null 2>&1 \
 
 if [ "$KEEP_APP" = "0" ]; then
   step "Removing the application bundle"
-  for path in "$ROOT/build/$APP_NAME.app" "/Applications/$APP_NAME.app" "$HOME/Applications/$APP_NAME.app"; do
-    if [ -d "$path" ]; then rm -rf "$path" && ok "removed $path"; fi
+  removed_any=0
+  for path in "${APP_PATHS[@]}"; do
+    if [ -d "$path" ]; then rm -rf "$path" && ok "removed $path" && removed_any=1; fi
   done
+  [ "$removed_any" = "0" ] && skip "no installed app found"
 else
   step "Keeping the application bundle (--keep-app)"
   skip "$ROOT/build/$APP_NAME.app left in place"

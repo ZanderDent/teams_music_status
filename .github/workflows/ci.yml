@@ -48,6 +48,54 @@ jobs:
         # docs/ACCEPTANCE_TESTS.md and are run by hand before release.
         run: swift test
 
+  package:
+    name: Unsigned release artifact
+    runs-on: macos-15
+    timeout-minutes: 25
+    needs: build-and-test
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Select the newest Xcode on the runner
+        run: |
+          set -euo pipefail
+          latest=$(ls -d /Applications/Xcode*.app | sort -V | tail -1)
+          sudo xcode-select -s "$latest/Contents/Developer"
+
+      - name: Build the app icon
+        run: |
+          set -euo pipefail
+          swift Assets/AppIcon/make-icon.swift Assets/AppIcon
+          iconutil -c icns Assets/AppIcon/AppIcon.iconset -o Assets/AppIcon/AppIcon.icns
+
+      - name: Package (unsigned)
+        # Deliberately unsigned. Signing and notarization need a Developer ID
+        # certificate and an app-specific password, and neither belongs in CI secrets
+        # for a project this size — releases are cut on the maintainer's Mac. This job
+        # exists to catch packaging regressions, not to produce a downloadable build.
+        run: ./scripts/release.sh --unsigned --skip-tests
+
+      - name: Verify the artifact
+        run: |
+          set -euo pipefail
+          test -f dist/Teams-Music-Status-*.dmg
+          MP=$(mktemp -d)
+          hdiutil attach dist/Teams-Music-Status-*.dmg -mountpoint "$MP" -nobrowse -noautoopen
+          test -d "$MP/Teams Music Status.app"          || { echo "app missing from DMG"; exit 1; }
+          test -L "$MP/Applications"                     || { echo "Applications alias missing"; exit 1; }
+          lipo -archs "$MP/Teams Music Status.app/Contents/MacOS/TeamsMusicStatus"
+          /usr/libexec/PlistBuddy -c 'Print :LSUIElement' "$MP/Teams Music Status.app/Contents/Info.plist"
+          hdiutil detach "$MP"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: unsigned-dmg-validation
+          path: |
+            dist/*.dmg
+            dist/release-info.txt
+          retention-days: 7
+
   guard:
     name: Repository hygiene
     runs-on: ubuntu-latest
