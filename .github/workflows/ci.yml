@@ -68,8 +68,11 @@ jobs:
         # is caught here instead of at release time.
         run: |
           set -euo pipefail
-          python3 -m pip install --quiet --disable-pip-version-check pillow numpy
-          python3 Assets/AppIcon/make-icon.py
+          # A virtualenv, not a plain pip install: the runner's Python is Homebrew's and
+          # is marked externally managed, so installing into it fails under PEP 668.
+          python3 -m venv "$RUNNER_TEMP/iconenv"
+          "$RUNNER_TEMP/iconenv/bin/pip" install --quiet --disable-pip-version-check pillow numpy
+          "$RUNNER_TEMP/iconenv/bin/python" Assets/AppIcon/make-icon.py
           iconutil -c icns Assets/AppIcon/AppIcon.iconset -o Assets/AppIcon/AppIcon.icns
 
       - name: Package (unsigned)
