@@ -1,5 +1,9 @@
 # Teams Music Status
 
+[![CI](https://github.com/ZanderDent/teams_music_status/actions/workflows/ci.yml/badge.svg)](https://github.com/ZanderDent/teams_music_status/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+![Platform: macOS 14+](https://img.shields.io/badge/platform-macOS%2014%2B-lightgrey)
+
 Discord-style rich presence for Microsoft Teams on macOS. It shows what you're listening
 to as your Teams custom status message:
 
