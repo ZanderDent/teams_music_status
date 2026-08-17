@@ -13,8 +13,10 @@ to as your Teams custom status message:
 
 A small menu-bar utility. No Dock icon, no window unless you ask for one.
 
-> **Status:** early. macOS only. Works on the machine it was built and tested on;
-> not yet signed for distribution. See [Known limitations](#known-limitations).
+Teams Music Status, developed by Zander Dent.
+
+> **Status:** v1.0.0. macOS 14+. Signed with a Developer ID certificate and notarized by
+> Apple, so it installs and opens normally. See [Known limitations](#known-limitations).
 
 <!-- TODO: screenshot of the menu-bar panel, and a short screen recording of a track
      change updating the Teams status. -->
@@ -56,7 +58,7 @@ No screen coordinates.**
 3. Launch it from Applications. It appears in the menu bar as ♪ — there is no Dock icon.
 4. A setup window walks you through the rest:
    * **Allow Accessibility access** — this is how the app types your Teams status.
-     macOS will open System Settings; switch on *TeamsMusicStatus*. The window ticks
+     macOS will open System Settings; switch on **Teams Music Status**. The window ticks
      itself once you do.
    * **Connect Spotify** — signs in through your browser, once.
    * **Microsoft Teams** — confirms Teams is running.
@@ -278,10 +280,12 @@ the core.
 * **The Teams profile flyout is briefly visible** during an update (~3 seconds). If Teams
   is on a second monitor you will see it open and close. It is not brought to the front,
   and it never takes keyboard focus.
-* **Release signing.** Releases are signed with a Developer ID certificate and notarized
-  by Apple, so they open normally. A build you make yourself is unsigned, and macOS will
-  warn that the developer cannot be verified — right-click the app and choose **Open** to
-  get past it, or build with your own certificate.
+* **Builds you make yourself are not notarized.** Released DMGs are signed with a
+  Developer ID certificate and notarized by Apple, so they open with no warning at all. A
+  build from source is signed with whatever local certificate you have, which Gatekeeper
+  will refuse on any other Mac. Note that macOS 15 removed the old right-click → Open
+  bypass: getting past it now means System Settings → Privacy & Security → **Open Anyway**.
+  Use a release build unless you are developing.
 
 ---
 
