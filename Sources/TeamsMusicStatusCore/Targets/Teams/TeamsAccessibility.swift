@@ -496,9 +496,26 @@ public final class TeamsAccessibility {
         guard let pid = TeamsProcesses.pid() else { return }
         guard let windows = AXElement(pid: pid)
             .rawAttribute(kAXWindowsAttribute as String) as? [AXUIElement] else { return }
-        for window in windows {
-            AXElement(window).performAction(kAXRaiseAction as String)
+
+        // Exactly one window, not all of them.
+        //
+        // This used to raise every Teams window in a loop, which is more disturbance than
+        // the job needs: someone with a popped-out chat or a meeting window would get all
+        // of them thrown forward to un-throttle one renderer. Raising is the most visible
+        // thing this app does to a window that is not its own, so it does the minimum.
+        //
+        // The first non-minimized window is the one automation targets — the profile
+        // control lives in the main window — and raising it is what un-throttles the
+        // renderer. Minimized windows are skipped: raising one restores it, which is the
+        // behaviour that had Teams jumping out of the Dock.
+        let candidate = windows.first { window in
+            (AXElement(window).rawAttribute(kAXMinimizedAttribute as String) as? NSNumber)?.boolValue != true
         }
+        guard let target = candidate else {
+            Log.accessibility.info("every Teams window is minimized; not raising any of them")
+            return
+        }
+        AXElement(target).performAction(kAXRaiseAction as String)
         // The renderer needs a beat after being un-throttled; poll rather than guess.
         _ = AXPoll.wait(timeout: 3) { self.isTreeMaterialized() }
     }
