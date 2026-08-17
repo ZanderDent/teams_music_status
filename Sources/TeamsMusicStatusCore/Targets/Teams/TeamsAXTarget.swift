@@ -53,6 +53,9 @@ public final class TeamsAXTarget: PresenceTarget {
     /// Cheap enough for the poll loop, unlike `availability()`.
     public var isShowingSignIn: Bool { accessibility.isShowingSignIn() }
 
+    /// Cheap enough for the poll loop, unlike `availability()`.
+    public var isMinimized: Bool { accessibility.isMinimized() }
+
     public func prepare() throws {
         try TeamsUI.exclusive { try accessibility.ensureHealthy() }
     }

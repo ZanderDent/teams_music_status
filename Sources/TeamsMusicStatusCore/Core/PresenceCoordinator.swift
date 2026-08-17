@@ -162,6 +162,10 @@ public final class PresenceCoordinator: ObservableObject {
             return 30    // needs the user; no point hammering
         case .teamsNotRunning:
             return 15
+        case .teamsMinimized:
+            // Short enough to resume promptly when the window comes back, long enough not
+            // to poll Teams constantly while nobody is looking at it.
+            return 10
         case .teamsSignedOut:
             // Long, and deliberately so. The user is typing a password into Teams; every
             // poll is another chance to search its tree while they do. Checking every 20
@@ -208,6 +212,7 @@ public final class PresenceCoordinator: ObservableObject {
     /// titles `health()` already reads — because this runs on every tick.
     private func currentTeamsInteraction() -> SyncEngine.TeamsInteraction {
         if target.isShowingSignIn { return .signInRequired }
+        if target.isMinimized { return .minimized }
         return TeamsProcesses.isFrontmost ? .userIsInTeams : .available
     }
 

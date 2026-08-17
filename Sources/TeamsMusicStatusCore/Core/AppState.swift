@@ -23,6 +23,7 @@ public enum AppState: Equatable, Sendable {
     case teamsAccessibilityPermissionMissing
     case teamsAccessibilityTreeUnavailable
     case teamsSignedOut
+    case teamsMinimized
     case teamsSelectorsChanged(String)
 
     case manualOverrideDetected(String?)
@@ -45,6 +46,7 @@ public enum AppState: Equatable, Sendable {
         case .teamsAccessibilityPermissionMissing: return "Needs Accessibility permission"
         case .teamsAccessibilityTreeUnavailable: return "Teams interface unavailable"
         case .teamsSignedOut: return "Teams is signed out"
+        case .teamsMinimized: return "Teams is minimized"
         case .teamsSelectorsChanged: return "Teams UI changed"
         case .manualOverrideDetected: return "Manual status detected"
         case .recovering: return "Reconnecting…"
@@ -80,6 +82,9 @@ public enum AppState: Equatable, Sendable {
             return "Teams Music Status needs Accessibility permission to update your status."
         case .teamsAccessibilityTreeUnavailable:
             return "Teams is running but is not exposing its interface. Trying to recover."
+        case .teamsMinimized:
+            return "Teams is minimized. Updates are paused rather than pulling its window "
+                 + "back in front of you — they resume as soon as you open Teams again."
         case .teamsSignedOut:
             return "Teams is asking you to sign in. Syncing is paused so it doesn't get in your way — it resumes on its own once you're back in."
         case .teamsSelectorsChanged(let detail):
@@ -100,7 +105,7 @@ public enum AppState: Equatable, Sendable {
         case .ready, .syncing: return .active
         case .disabled, .noPlayback, .recovering: return .idle
         case .spotifyRateLimited, .spotifyUnreachable, .manualOverrideDetected,
-             .teamsNotRunning, .teamsAccessibilityTreeUnavailable, .teamsSignedOut:
+             .teamsNotRunning, .teamsAccessibilityTreeUnavailable, .teamsSignedOut, .teamsMinimized:
             return .warning
         case .spotifyDisconnected, .spotifyAuthExpired, .spotifyPermissionMissing,
              .spotifyAutomationDenied,

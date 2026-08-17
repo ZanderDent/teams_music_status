@@ -164,3 +164,48 @@ final class WriteDeferralTests: XCTestCase {
                        .reportManualOverride(found: "Heads down"))
     }
 }
+
+// MARK: - Minimized Teams
+
+extension WriteDeferralTests {
+
+    private var minimisedInput: SyncEngine.Input {
+        SyncEngine.Input(presence: TrackPresence(trackName: "Dreams", artists: ["Fleetwood Mac"],
+                                                 albumName: "Rumours", isPlaying: true, trackID: "t1"),
+                         rendered: StatusTemplate().render(StatusTemplate.previewPresence),
+                         observedTeamsStatus: nil,
+                         teamsInteraction: .minimized)
+    }
+
+    /// Chromium will not run click handlers for a minimized window, so writing means
+    /// restoring it — which throws Teams in front of whatever the user is doing, and never
+    /// puts it back. Measured: the window went to z-index 0 and stayed un-minimized.
+    /// Waiting is strictly better than yanking someone's window out of the Dock.
+    func testNeverRestoresAMinimizedTeamsJustToWrite() {
+        var state = SyncEngine.State()
+        let sync = SyncEngine(configuration: .init(debounce: 5, pauseGrace: 300, frontmostDeferCap: 30))
+        // Far past the frontmost cap: being minimized has no cap, like sign-in.
+        for offset in [0.0, 30.0, 300.0, 3600.0] {
+            let now = Date(timeIntervalSince1970: 1_000_000).addingTimeInterval(offset)
+            XCTAssertEqual(sync.step(state: &state, input: minimisedInput, now: now), .doNothing,
+                           "must not restore the window after \(offset)s")
+        }
+        XCTAssertNil(state.lastWrittenByApp, "nothing was written")
+    }
+
+    func testResumesWhenTheUserOpensTeamsAgain() {
+        var state = SyncEngine.State()
+        let sync = SyncEngine(configuration: .init(debounce: 5, pauseGrace: 300, frontmostDeferCap: 30))
+        let start = Date(timeIntervalSince1970: 1_000_000)
+        XCTAssertEqual(sync.step(state: &state, input: minimisedInput, now: start), .doNothing)
+
+        let restored = SyncEngine.Input(presence: minimisedInput.presence,
+                                        rendered: minimisedInput.rendered,
+                                        observedTeamsStatus: nil,
+                                        teamsInteraction: .available)
+        guard case .write = sync.step(state: &state, input: restored,
+                                      now: start.addingTimeInterval(5)) else {
+            return XCTFail("should write as soon as Teams is usable again")
+        }
+    }
+}

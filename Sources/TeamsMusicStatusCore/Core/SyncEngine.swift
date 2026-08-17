@@ -51,6 +51,10 @@ public struct SyncEngine {
         case userIsInTeams
         /// Teams is asking the user to authenticate. Hands off, indefinitely.
         case signInRequired
+        /// Every Teams window is in the Dock. Chromium will not run click handlers for a
+        /// minimized window, so writing means restoring it — which throws Teams in front
+        /// of whatever the user is doing. Wait for them to bring it back themselves.
+        case minimized
     }
 
     public struct State: Equatable, Sendable {
@@ -152,9 +156,10 @@ public struct SyncEngine {
             state = trial
             return action
 
-        case .signInRequired:
-            // Indefinite by instruction. Teams belongs to the user until they are signed
-            // back in. State is left untouched so the write is simply retried later.
+        case .signInRequired, .minimized:
+            // Indefinite, and for the same reason in both cases: acting would require
+            // taking the window off the user. State is left untouched so the write is
+            // simply retried once Teams is usable again.
             return .doNothing
 
         case .userIsInTeams:

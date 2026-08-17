@@ -149,6 +149,18 @@ public final class TeamsAccessibility {
         return windows.contains { TeamsSelectors.titleIndicatesSignIn(AXElement($0).title) }
     }
 
+    /// Whether every Teams window is in the Dock.
+    ///
+    /// Cheap — one attribute per top-level window — so the poll loop can ask every tick.
+    public func isMinimized() -> Bool {
+        guard Self.hasAccessibilityPermission, let pid = TeamsProcesses.pid() else { return false }
+        let windows = (AXElement(pid: pid).rawAttribute(kAXWindowsAttribute as String) as? [AXUIElement]) ?? []
+        guard !windows.isEmpty else { return false }
+        return windows.allSatisfy {
+            (AXElement($0).rawAttribute(kAXMinimizedAttribute as String) as? NSNumber)?.boolValue == true
+        }
+    }
+
     /// Cheap check used by hot paths that already know Teams is up.
     public func isTreeMaterialized() -> Bool {
         guard let pid = TeamsProcesses.pid() else { return false }
