@@ -23,13 +23,34 @@ public struct SyncEngine {
         /// How long playback may stay paused/absent before the user's previous status is
         /// put back. Resuming inside this window causes no Teams churn at all.
         public var pauseGrace: TimeInterval
+        /// Longest a write may be held back because the user is working in Teams.
+        ///
+        /// Writing while someone is typing in Teams risks stealing the keystrokes that
+        /// drive the flyout, so the write waits for them to leave. It cannot wait forever
+        /// though — someone who lives in Teams all day would never see their status
+        /// update — so after this the write goes ahead on the normal verified background
+        /// path, which does not take focus.
+        public var frontmostDeferCap: TimeInterval
 
         public static let `default` = Configuration(debounce: 5, pauseGrace: 300)
 
-        public init(debounce: TimeInterval = 5, pauseGrace: TimeInterval = 300) {
+        public init(debounce: TimeInterval = 5,
+                    pauseGrace: TimeInterval = 300,
+                    frontmostDeferCap: TimeInterval = 30) {
             self.debounce = debounce
             self.pauseGrace = pauseGrace
+            self.frontmostDeferCap = frontmostDeferCap
         }
+    }
+
+    /// What Teams is doing, from the user's point of view rather than the tree's.
+    public enum TeamsInteraction: Equatable, Sendable {
+        /// Teams is in the background. Safe to drive.
+        case available
+        /// Teams is the frontmost app — the user is probably typing in it.
+        case userIsInTeams
+        /// Teams is asking the user to authenticate. Hands off, indefinitely.
+        case signInRequired
     }
 
     public struct State: Equatable, Sendable {
@@ -47,6 +68,13 @@ public struct SyncEngine {
         public var idleSince: Date?
         /// Set once a manual edit is seen. Latches until the user clears it.
         public var manualOverrideDetected = false
+        /// When a Teams-touching action was first held back because the user was in Teams.
+        ///
+        /// Deliberately measured from when a write became *wanted*, not from when Teams
+        /// came to the front. Timing it from the latter would mean someone who had been
+        /// in Teams for five minutes gets the next track written instantly, which is the
+        /// exact collision the deferral exists to avoid.
+        public var deferredSince: Date?
 
         public init() {}
     }
@@ -59,6 +87,15 @@ public struct SyncEngine {
         case restore(String?)
         /// Teams shows something the app did not write — stop and tell the user.
         case reportManualOverride(found: String?)
+
+        /// Whether carrying this out drives the Teams UI. Only these can collide with a
+        /// user who is working in Teams, so only these are ever deferred.
+        var touchesTeams: Bool {
+            switch self {
+            case .write, .restore: return true
+            case .doNothing, .reportManualOverride: return false
+            }
+        }
     }
 
     /// Everything the engine needs to decide, gathered by the coordinator.
@@ -69,11 +106,17 @@ public struct SyncEngine {
         /// What Teams currently shows, when it is cheaply known. Nil means "not observed
         /// this tick" — absence must never be mistaken for an empty status.
         public let observedTeamsStatus: String??
+        /// Whether it is polite — and safe — to drive Teams right now.
+        public let teamsInteraction: TeamsInteraction
 
-        public init(presence: TrackPresence?, rendered: String?, observedTeamsStatus: String?? = nil) {
+        public init(presence: TrackPresence?,
+                    rendered: String?,
+                    observedTeamsStatus: String?? = nil,
+                    teamsInteraction: TeamsInteraction = .available) {
             self.presence = presence
             self.rendered = rendered
             self.observedTeamsStatus = observedTeamsStatus
+            self.teamsInteraction = teamsInteraction
         }
     }
 
@@ -84,7 +127,51 @@ public struct SyncEngine {
     }
 
     /// Advance the state machine one tick.
+    /// Decide what to do, then decide whether now is a polite moment to do it.
+    ///
+    /// The deferral is applied *after* the decision rather than before, because whether a
+    /// write is wanted is exactly what starts the clock. It is applied to a throwaway copy
+    /// of the state, so holding an action back leaves no trace: `decide` mutates state on
+    /// the assumption its action is carried out — `.restore` clears `lastWrittenByApp`,
+    /// writes clear the pending candidate — and committing those while suppressing the
+    /// action would silently lose the user's saved status.
     public func step(state: inout State, input: Input, now: Date) -> Action {
+        var trial = state
+        let action = decide(state: &trial, input: input, now: now)
+
+        guard action.touchesTeams else {
+            // Nothing wanted, so nothing is being held back: reset the clock.
+            trial.deferredSince = nil
+            state = trial
+            return action
+        }
+
+        switch input.teamsInteraction {
+        case .available:
+            trial.deferredSince = nil
+            state = trial
+            return action
+
+        case .signInRequired:
+            // Indefinite by instruction. Teams belongs to the user until they are signed
+            // back in. State is left untouched so the write is simply retried later.
+            return .doNothing
+
+        case .userIsInTeams:
+            let since = state.deferredSince ?? now
+            guard now.timeIntervalSince(since) >= configuration.frontmostDeferCap else {
+                state.deferredSince = since
+                return .doNothing
+            }
+            // Waited long enough. Go ahead on the normal verified background path — it
+            // does not take focus, so the worst case is a brief flyout, not a hijack.
+            trial.deferredSince = nil
+            state = trial
+            return action
+        }
+    }
+
+    private func decide(state: inout State, input: Input, now: Date) -> Action {
         // 1. Manual-override detection, before anything else.
         //
         // Only meaningful once the app has written something: until then, whatever Teams

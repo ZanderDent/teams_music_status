@@ -198,6 +198,19 @@ public final class PresenceCoordinator: ObservableObject {
         return min(scaled, cap)
     }
 
+    /// Whether it is a polite moment to drive Teams.
+    ///
+    /// Sign-in is checked first and outranks everything: a sign-in sheet often appears
+    /// while Teams is *not* frontmost, and deferring for 30 seconds there would still
+    /// mean typing into someone's authentication window.
+    ///
+    /// Cheap by construction — a bundle-identifier comparison and, at most, the window
+    /// titles `health()` already reads — because this runs on every tick.
+    private func currentTeamsInteraction() -> SyncEngine.TeamsInteraction {
+        if target.isShowingSignIn { return .signInRequired }
+        return TeamsProcesses.isFrontmost ? .userIsInTeams : .available
+    }
+
     private func tick() async {
         guard isEnabled else { return }
 
@@ -223,7 +236,10 @@ public final class PresenceCoordinator: ObservableObject {
         renderedStatus = (presence?.isPlaying == true) ? rendered : nil
 
         // 2. Decide.
-        let input = SyncEngine.Input(presence: presence, rendered: rendered, observedTeamsStatus: nil)
+        let input = SyncEngine.Input(presence: presence,
+                                     rendered: rendered,
+                                     observedTeamsStatus: nil,
+                                     teamsInteraction: currentTeamsInteraction())
         let action = engine.step(state: &engineState, input: input, now: Date())
 
         // 3. Act.

@@ -22,6 +22,14 @@ public enum TeamsProcesses {
 
     public static func pid() -> pid_t? { runningApp()?.processIdentifier }
 
+    /// Whether Teams is the app the user is currently working in.
+    ///
+    /// Drives the write deferral: a status write types into the Teams flyout, and doing
+    /// that while someone is typing there themselves risks stealing their keystrokes.
+    public static var isFrontmost: Bool {
+        NSWorkspace.shared.frontmostApplication?.bundleIdentifier == bundleIdentifier
+    }
+
     /// Installed Teams version, read from the bundle rather than from any running process
     /// so it is available even when Teams is not running.
     public static func installedVersion() -> String? {

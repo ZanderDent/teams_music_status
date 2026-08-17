@@ -134,7 +134,19 @@ public final class TeamsAccessibility {
             return .signedOut
         }
 
+
         return profileSelector.find(in: app) != nil ? .healthy : .treeUnavailable
+    }
+
+    /// Whether Teams is asking the user to authenticate.
+    ///
+    /// Reads top-level window titles only — one attribute per window — so it is cheap
+    /// enough to call every tick, unlike `health()`, which walks the tree looking for the
+    /// profile control.
+    public func isShowingSignIn() -> Bool {
+        guard Self.hasAccessibilityPermission, let pid = TeamsProcesses.pid() else { return false }
+        let windows = (AXElement(pid: pid).rawAttribute(kAXWindowsAttribute as String) as? [AXUIElement]) ?? []
+        return windows.contains { TeamsSelectors.titleIndicatesSignIn(AXElement($0).title) }
     }
 
     /// Cheap check used by hot paths that already know Teams is up.
