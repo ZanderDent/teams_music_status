@@ -9,9 +9,14 @@ public enum TeamsHealth: Equatable, Sendable {
     case noWindow                   // running, but the last main window was closed
     case minimized                  // window exists but is in the Dock; AX reads work, clicks don't
     case treeUnavailable            // window present, but WebView2 hasn't published its a11y tree
+    case signedOut                  // Teams is asking the user to authenticate — hands off
     case healthy                    // profile control resolves; automation can proceed
 
     public var canAutomate: Bool { self == .healthy }
+
+    /// States that mean "the user has to do something in Teams". Automating against these
+    /// is not merely futile, it actively gets in their way, so recovery must not try.
+    public var isUserBusy: Bool { self == .signedOut }
 }
 
 public enum TeamsAccessibilityError: LocalizedError, Equatable {
@@ -20,6 +25,7 @@ public enum TeamsAccessibilityError: LocalizedError, Equatable {
     case couldNotReopenWindow
     case couldNotUnminimize
     case treeUnavailable(attempts: Int, elapsed: TimeInterval)
+    case signedOut
 
     public var errorDescription: String? {
         switch self {
@@ -34,6 +40,8 @@ public enum TeamsAccessibilityError: LocalizedError, Equatable {
         case .treeUnavailable(let attempts, let elapsed):
             return String(format: "Teams' interface did not become available to the "
                           + "Accessibility API after %d attempts over %.0f seconds.", attempts, elapsed)
+        case .signedOut:
+            return "Teams is asking you to sign in. Syncing is paused until you're back in."
         }
     }
 }
@@ -116,6 +124,16 @@ public final class TeamsAccessibility {
         }
         if allMinimized { return .minimized }
 
+        // Check before the profile control, not after. When Teams puts up its sign-in
+        // sheet the app shell frequently survives underneath, so the profile button still
+        // resolves and this would otherwise report `.healthy` and let a write proceed —
+        // which is precisely how the integration ended up fighting the user for the
+        // sign-in screen. Window titles are one attribute read each, so this is cheap
+        // enough to sit on the hot path.
+        if windows.contains(where: { TeamsSelectors.titleIndicatesSignIn(AXElement($0).title) }) {
+            return .signedOut
+        }
+
         return profileSelector.find(in: app) != nil ? .healthy : .treeUnavailable
     }
 
@@ -150,6 +168,13 @@ public final class TeamsAccessibility {
 
             case .notRunning:
                 throw TeamsAccessibilityError.notRunning
+
+            case .signedOut:
+                // Deliberately no repair. Every tool in this loop — Escape, AXRaise,
+                // re-opening windows, the enabler — would interfere with someone trying
+                // to type a password. Fail immediately and let the caller back off.
+                Log.accessibility.info("Teams is showing a sign-in window; standing down")
+                throw TeamsAccessibilityError.signedOut
 
             case .noWindow:
                 Log.accessibility.info("Teams has no open window; requesting reopen without activation")

@@ -17,6 +17,38 @@ import Foundation
 ///   self-test rather than misbehave, which is the intended outcome.
 public enum TeamsSelectors {
 
+    // MARK: Teams is not ready for automation
+
+    /// Window-title fragments that mean Teams is asking the user to authenticate.
+    ///
+    /// Matched against **top-level window titles only**, which costs one attribute read per
+    /// window rather than a walk of the ~4300 node tree, so it is affordable on the hot
+    /// path where a full search is not.
+    ///
+    /// This is a best-effort signal used to *stand down* and to explain why. Nothing
+    /// destructive depends on it being right: the safety property — never dismissing UI we
+    /// did not open — is enforced in `closeFlyout`, which checks for our own flyout rather
+    /// than trusting this. A false positive pauses syncing until the window goes away; a
+    /// false negative simply produces the ordinary "couldn't reach the control" failure.
+    /// Both are recoverable, and neither touches the user's Teams.
+    public static let signInWindowTitleFragments = [
+        "sign in",
+        "sign out",
+        "pick an account",
+        "use another account",
+        "enter password",
+        "verify your identity",
+        "we couldn't sign you in",
+        "microsoft teams — login",
+    ]
+
+    /// True when a window title indicates Teams wants the user, not us.
+    public static func titleIndicatesSignIn(_ title: String?) -> Bool {
+        guard let title, !title.isEmpty else { return false }
+        let lowered = title.lowercased()
+        return signInWindowTitleFragments.contains { lowered.contains($0) }
+    }
+
     // MARK: Always present (when the tree is healthy)
 
     /// Avatar button in the title bar. Opens the profile flyout.

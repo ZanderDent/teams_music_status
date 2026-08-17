@@ -162,9 +162,26 @@ public final class PresenceCoordinator: ObservableObject {
             return 30    // needs the user; no point hammering
         case .teamsNotRunning:
             return 15
+        case .teamsSignedOut:
+            // Long, and deliberately so. The user is typing a password into Teams; every
+            // poll is another chance to search its tree while they do. Checking every 20
+            // seconds still picks sign-in back up promptly without hovering.
+            return 20
+        case .recovering, .teamsAccessibilityTreeUnavailable:
+            // Back off as failures repeat rather than retrying at full rate forever. A
+            // fixed 3-second retry against a Teams that is busy or broken is how this app
+            // turned one problem into a persistent nuisance.
+            return Self.backoffInterval(base: settings.pollInterval, failures: consecutiveFailures)
         default:
             return settings.pollInterval
         }
+    }
+
+    /// Exponential backoff, capped. Pure so it can be tested without a run loop.
+    nonisolated static func backoffInterval(base: TimeInterval, failures: Int) -> TimeInterval {
+        guard failures > 1 else { return base }
+        let scaled = base * pow(2.0, Double(min(failures - 1, 6)))
+        return min(scaled, 60)
     }
 
     private func tick() async {
@@ -316,6 +333,11 @@ public final class PresenceCoordinator: ObservableObject {
             state = .teamsNotRunning
         case TeamsAccessibilityError.treeUnavailable:
             state = .teamsAccessibilityTreeUnavailable
+        case TeamsAccessibilityError.signedOut:
+            // Not a failure to fix. Teams wants the user, and the kindest thing this app
+            // can do is get out of the way until they are done. Deliberately does not
+            // count as a consecutive failure: this is an expected state, not a fault.
+            state = .teamsSignedOut
         case PresenceTargetError.elementNotFound(let selector, _):
             // A missing selector after a Teams update is not a transient glitch; stop
             // automating and tell the user rather than thrashing against a changed UI.

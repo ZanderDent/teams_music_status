@@ -46,6 +46,7 @@ public final class TeamsAXTarget: PresenceTarget {
         case .noWindow: return .needsRecovery("Teams has no open window")
         case .minimized: return .needsRecovery("Teams is minimized")
         case .treeUnavailable: return .needsRecovery("Teams' interface is not exposed yet")
+        case .signedOut: return .needsRecovery("Teams is signed out")
         }
     }
 
@@ -197,13 +198,36 @@ public final class TeamsAXTarget: PresenceTarget {
         }
     }
 
-    /// Dismiss the flyout without committing anything further.
+    /// Dismiss *our* flyout without committing anything further.
+    ///
+    /// ## Never press Escape at a Teams that is showing something else
+    ///
+    /// This used to send Escape unconditionally, on the reasoning that Escape at an idle
+    /// Teams is harmless. It is not, because Teams is not always idle when a write fails.
+    ///
+    /// When Teams puts up its sign-in sheet, the app shell — and the profile button —
+    /// often survive underneath it, so the health check still reports `.healthy` and a
+    /// write is attempted. Activating the profile button then fails, because a modal is
+    /// up, and the failure path fired Escape three times per attempt: once from this
+    /// method's `defer`, once from `withRecovery`, and once more on the retry. Escape went
+    /// to the sheet rather than to a flyout, and closed it. With the poll loop retrying
+    /// every three seconds, the user could not stay on the sign-in screen long enough to
+    /// type a password — the integration made Teams unusable, which is far worse than
+    /// failing to set a status.
+    ///
+    /// So: only ever close a flyout that is actually open. Dismissing anything else is
+    /// not this app's business. The extra subtree search costs nothing on the success
+    /// path, where the dialog is present and found near the front of the tree, and only
+    /// happens at all on paths that were already failing.
     private func closeFlyout() {
         defer { releaseFlyoutScope() }
+        guard let app = try? appElement() else { return }
+        guard TeamsSelectors.profileDialog.find(in: app, maxDepth: AXActivator.flyoutSearchDepth) != nil else {
+            Log.debug(Log.teams, "closeFlyout: no profile flyout open — not sending Escape")
+            return
+        }
         guard let keys = try? keyboard() else { return }
         keys.send(.escape)
-        // Again, one cheap check rather than two expensive absent-element searches.
-        guard let app = try? appElement() else { return }
         _ = AXPoll.wait(timeout: 1.5) {
             TeamsSelectors.profileDialog.find(in: app, maxDepth: AXActivator.flyoutSearchDepth) == nil
         }
