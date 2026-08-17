@@ -171,17 +171,31 @@ public final class PresenceCoordinator: ObservableObject {
             // Back off as failures repeat rather than retrying at full rate forever. A
             // fixed 3-second retry against a Teams that is busy or broken is how this app
             // turned one problem into a persistent nuisance.
-            return Self.backoffInterval(base: settings.pollInterval, failures: consecutiveFailures)
+            //
+            // The ceiling is five minutes, not one. When Teams keeps accepting the UI
+            // interaction and then not storing the status, the cause is on Teams' side —
+            // a stale session, a dropped connection — and no amount of retrying fixes it.
+            // Continuing to drive its flyout every minute while the user works is the
+            // behaviour that made this app feel like it was breaking Teams.
+            return Self.backoffInterval(base: settings.pollInterval,
+                                        failures: consecutiveFailures,
+                                        cap: Self.teamsFailureCooldown)
         default:
             return settings.pollInterval
         }
     }
 
+    /// Ceiling for repeated Teams write failures. Long deliberately: past a handful of
+    /// attempts the problem is not one this app can retry its way out of.
+    nonisolated static let teamsFailureCooldown: TimeInterval = 300
+
     /// Exponential backoff, capped. Pure so it can be tested without a run loop.
-    nonisolated static func backoffInterval(base: TimeInterval, failures: Int) -> TimeInterval {
+    nonisolated static func backoffInterval(base: TimeInterval,
+                                            failures: Int,
+                                            cap: TimeInterval = 60) -> TimeInterval {
         guard failures > 1 else { return base }
-        let scaled = base * pow(2.0, Double(min(failures - 1, 6)))
-        return min(scaled, 60)
+        let scaled = base * pow(2.0, Double(min(failures - 1, 10)))
+        return min(scaled, cap)
     }
 
     private func tick() async {

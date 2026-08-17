@@ -99,6 +99,20 @@ final class SignedOutTests: XCTestCase {
         XCTAssertEqual(PresenceCoordinator.backoffInterval(base: base, failures: 99), 60, "still capped")
     }
 
+    /// Repeated Teams write failures settle at five minutes rather than one. When Teams
+    /// accepts the interaction but never stores the status, retrying is pointless and
+    /// driving its flyout every minute is what makes the app feel like it breaks Teams.
+    func testTeamsFailuresSettleAtAFiveMinuteCooldown() {
+        let cap = PresenceCoordinator.teamsFailureCooldown
+        XCTAssertEqual(cap, 300)
+        let settled = PresenceCoordinator.backoffInterval(base: 3, failures: 20, cap: cap)
+        XCTAssertEqual(settled, 300)
+        // It must actually reach the ceiling, not stall below it — with a 3s base and a
+        // doubling per failure that needs enough headroom in the exponent.
+        XCTAssertEqual(PresenceCoordinator.backoffInterval(base: 3, failures: 7, cap: cap), 192)
+        XCTAssertEqual(PresenceCoordinator.backoffInterval(base: 3, failures: 8, cap: cap), 300)
+    }
+
     func testBackoffNeverReturnsLessThanTheBaseInterval() {
         for failures in 0...20 {
             XCTAssertGreaterThanOrEqual(
