@@ -60,6 +60,33 @@ final class SignedOutTests: XCTestCase {
         XCTAssertFalse(TeamsSelectors.titleIndicatesSignIn(nil))
     }
 
+    // MARK: - What counts as "ours to close"
+
+    /// Escape is only ever sent when one of these is on screen. The set has to cover the
+    /// status *editor* as well as the profile flyout: Teams swaps the "Profile menu"
+    /// dialog for the editor once the status field opens, and a guard that only knew about
+    /// the profile menu refused to close an open editor. That left it up, which collapses
+    /// the exposed tree to that dialog, and the stale-dialog recovery then raised the Teams
+    /// window — reported as "Teams keeps foregrounding itself".
+    func testOurStatusSurfacesCoverTheEditorAndNotJustTheFlyout() {
+        let names = Set(TeamsSelectors.ourStatusSurfaces.map(\.name))
+        XCTAssertTrue(names.contains("profileDialog"), "the flyout itself")
+        XCTAssertTrue(names.contains("composeBox"), "the editor — the case that regressed")
+        XCTAssertTrue(names.contains("statusReadout"), "the flyout after a status exists")
+    }
+
+    /// These gate a destructive key press, so every one must be specific to this app's
+    /// status UI. Anything that could match a sign-in sheet would reopen the original bug.
+    func testEveryStatusSurfaceIsSpecificToTheStatusUI() {
+        for selector in TeamsSelectors.ourStatusSurfaces {
+            let description = selector.describedAs.lowercased()
+            let isSpecific = description.contains("profile menu")
+                || description.contains("status")
+            XCTAssertTrue(isSpecific,
+                          "\(selector.name) is too generic to gate an Escape: \(selector.describedAs)")
+        }
+    }
+
     // MARK: - Standing down rather than repairing
 
     func testSignedOutIsNotAutomatableAndIsRecognisedAsTheUsersTurn() {

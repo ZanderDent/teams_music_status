@@ -232,9 +232,10 @@ public final class TeamsAccessibility {
 
         // Only bother if something dialog-like is actually present, otherwise this is a
         // genuinely empty tree and Escape will not help.
-        let hasDialog = TeamsSelectors.profileDialog.find(in: app) != nil
-            || TeamsSelectors.composeBox.find(in: app) != nil
-            || TeamsSelectors.statusReadout.find(in: app) != nil
+        // Same set `TeamsAXTarget.closeFlyout` uses. Sharing it matters: when these two
+        // disagreed, the target declined to close an editor that this method would then
+        // find and raise the window for.
+        let hasDialog = TeamsSelectors.ourStatusSurfaces.contains { $0.find(in: app) != nil }
         guard hasDialog else { return false }
 
         // Escape has to actually reach the renderer. If the Teams window is occluded,

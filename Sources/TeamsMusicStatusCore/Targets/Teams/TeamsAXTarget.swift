@@ -225,14 +225,19 @@ public final class TeamsAXTarget: PresenceTarget {
     private func closeFlyout() {
         defer { releaseFlyoutScope() }
         guard let app = try? appElement() else { return }
-        guard TeamsSelectors.profileDialog.find(in: app, maxDepth: AXActivator.flyoutSearchDepth) != nil else {
-            Log.debug(Log.teams, "closeFlyout: no profile flyout open — not sending Escape")
+
+        // Any of our surfaces, at full depth. Checking only `profileDialog` was too narrow:
+        // Teams swaps that dialog for the editor once the status field is open, so a
+        // failure there left the editor on screen, which wedges the tree and makes the
+        // stale-dialog recovery raise the Teams window.
+        guard TeamsSelectors.ourStatusSurfaces.contains(where: { $0.find(in: app) != nil }) else {
+            Log.debug(Log.teams, "closeFlyout: none of our status UI is open — not sending Escape")
             return
         }
         guard let keys = try? keyboard() else { return }
         keys.send(.escape)
         _ = AXPoll.wait(timeout: 1.5) {
-            TeamsSelectors.profileDialog.find(in: app, maxDepth: AXActivator.flyoutSearchDepth) == nil
+            TeamsSelectors.ourStatusSurfaces.allSatisfy { $0.find(in: app) == nil }
         }
     }
 

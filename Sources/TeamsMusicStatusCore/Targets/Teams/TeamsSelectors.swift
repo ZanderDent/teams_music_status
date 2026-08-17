@@ -183,6 +183,21 @@ public enum TeamsSelectors {
     /// Teams' own limit, read live from `characterCounter` when available.
     public static let statusCharacterLimit = 280
 
+    /// Evidence that *this app's* status UI is open — the profile flyout or the status
+    /// editor it leads to.
+    ///
+    /// Used to decide whether pressing Escape is ours to do. `profileDialog` alone is not
+    /// enough: once the status editor opens, Teams swaps the "Profile menu" dialog for the
+    /// editor, so a guard that only looked for the profile menu would refuse to close an
+    /// open editor. That leaves it open, which collapses the exposed tree to just that
+    /// dialog, and the stale-dialog recovery then raises the Teams window — surfacing as
+    /// "Teams keeps foregrounding itself".
+    ///
+    /// Every selector here is specific to the status UI, so none of them can match a
+    /// sign-in sheet, a call window or anything else the user might have open. That is
+    /// what keeps Escape safe.
+    public static let ourStatusSurfaces: [AXSelector] = [profileDialog, composeBox, statusReadout]
+
     /// Selectors the self-test must be able to resolve with the profile flyout open.
     public static let flyoutSelectors: [AXSelector] = [statusReadout]
 
