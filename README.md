@@ -47,7 +47,7 @@ No screen coordinates.**
 
 * **macOS 14 (Sonoma) or later** — Apple silicon or Intel
 * Microsoft Teams (the `com.microsoft.teams2` client), signed in
-* Spotify — either an account for the Web API, or the desktop app for the local source
+* **Spotify desktop app** — the status comes from what's playing in it
 
 ---
 
@@ -61,7 +61,8 @@ No screen coordinates.**
    * **Allow Accessibility access** — this is how the app types your Teams status.
      macOS will open System Settings; switch on **Teams Music Status**. The window ticks
      itself once you do.
-   * **Connect Spotify** — signs in through your browser, once.
+   * **Connect Spotify** — reads what's playing in the Spotify desktop app. macOS
+     asks once for permission; there is no Spotify sign-in and no API key.
    * **Microsoft Teams** — confirms Teams is running.
 5. Press **Start Syncing**. Play something, and your Teams status follows.
 
@@ -84,9 +85,15 @@ preferences, Keychain tokens and the permission grants.
 
 You only need this if you want to develop the app. Users should use the DMG above.
 
-### 1. Get a Spotify client ID
+### 1. Get a Spotify client ID — optional
 
-Spotify's Web API needs an application registration. This is free and takes a minute.
+**Skip this unless you want the Web API source.** The default source reads the Spotify
+desktop app directly and needs no registration, no key and no sign-in.
+
+The Web API source sees playback from any device signed into your account — phone, web
+player, another computer — but Spotify will only serve it to accounts you allowlist by
+hand, five at most (see [Known limitations](#known-limitations)). You are the owner of
+your own app, so your own account always works.
 
 1. Go to the [Spotify developer dashboard](https://developer.spotify.com/dashboard) and
    create an app.
@@ -190,19 +197,36 @@ Grant it in **System Settings ▸ Privacy & Security ▸ Accessibility**.
 ### Automation (Apple Events) — only for the local Spotify source
 
 Needed only if you choose **Local Spotify**, which reads the Spotify app on this Mac.
-macOS asks the first time it is used. The Spotify Web API source does not need it.
+macOS asks the first time it is used, and the app only asks when you actually
+choose to read Spotify — so the prompt arrives with a reason attached. The optional
+Web API source does not need it.
 
 ---
 
 ## Choosing a music source
 
-| | Spotify Web API (default) | Local Spotify app |
+**Local Spotify is the default and needs no setup.** The Web API is an advanced option
+that requires your own Spotify developer registration.
+
+| | Local Spotify app *(default)* | Spotify Web API *(advanced)* |
 |---|---|---|
-| Sign-in | One-time OAuth in your browser | None |
-| Sees playback on your phone / web player | Yes | No |
-| Works offline | No | Yes |
-| Artists | All of them | Primary artist only |
-| Extra permission | None | Automation |
+| Setup | None | Your own Spotify app + client ID |
+| Sign-in | None | One-time OAuth in your browser |
+| Sees playback on your phone / web player | No | Yes |
+| Works offline | Yes | No |
+| Artists | Primary artist only | All of them |
+| Extra permission | Automation (Apple Events) | None |
+| Who it can serve | Anyone | You, plus 5 accounts you allowlist by hand |
+
+That last row is why the default is what it is. Spotify caps a development-mode app at
+five manually-allowlisted accounts, and since May 2025 extended quota has been open only
+to registered organisations with at least 250,000 monthly active users. A shipped client
+ID therefore cannot serve the public — the sixth person to try it gets a `403`. Released
+builds embed no client ID at all.
+
+If you want cross-device playback, register your own free Spotify app and build from
+source with your client ID. You are the owner of that app, so your own account works
+without any allowlisting.
 
 Both implement the same `PresenceSource` interface, so switching is a menu choice.
 
@@ -267,6 +291,10 @@ the core.
 
 ## Known limitations
 
+* **The default source only sees Spotify on this Mac.** Playback from your phone, the web
+  player or another computer is invisible to it, and it reports the primary artist only.
+  The optional Web API source sees everything, but Spotify will only serve it to five
+  hand-allowlisted accounts — see [Choosing a music source](#choosing-a-music-source).
 * **macOS only.** A Windows port would need a different automation backend, and
   background updates without focus theft may not be achievable there — see
   `docs/FEASIBILITY.md` §13.
@@ -310,7 +338,7 @@ And:
 * **Spotify tokens live in the macOS Keychain**, never in files, `UserDefaults`, or logs.
   The only thing ever logged about a token is its length.
 * **No client secret.** OAuth uses PKCE, which exists precisely so a desktop app does not
-  need one. The client ID is public by design and safe to bundle.
+  need one. Released builds embed no client ID at all — the default source needs none.
 * **Minimum scope.** Only `user-read-currently-playing` is requested.
 * **Your status is visible to your whole organisation.** Track titles can be explicit or
   personal. The menu-bar toggle is the kill switch; consider what you play.
