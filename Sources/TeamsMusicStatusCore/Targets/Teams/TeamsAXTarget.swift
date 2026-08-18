@@ -56,6 +56,27 @@ public final class TeamsAXTarget: PresenceTarget {
     /// Cheap enough for the poll loop, unlike `availability()`.
     public var isMinimized: Bool { accessibility.isMinimized() }
 
+    /// Close a status flyout this app left open, if one is there.
+    ///
+    /// Called at startup, because the app only ever repaired the Teams tree as a side
+    /// effect of needing to write — and a relaunched instance usually decides it has
+    /// nothing to write, since the status it restored from disk already matches what is
+    /// playing. A flyout left open by a crash, a force quit, or an update installed
+    /// mid-write therefore stayed open on screen indefinitely, reported as "it left the
+    /// profile menu expanded and didn't close it back out".
+    ///
+    /// Deliberately narrow. It only acts when one of *our* surfaces is present, it never
+    /// raises or activates Teams, and it does nothing at all in the normal case where no
+    /// flyout is open — so a healthy launch is untouched.
+    public func closeAbandonedFlyout() {
+        TeamsUI.tryExclusive {
+            guard let app = try? appElement() else { return }
+            guard TeamsSelectors.ourStatusSurfaces.contains(where: { $0.find(in: app) != nil }) else { return }
+            Log.teams.info("closing a status flyout left open by a previous run")
+            closeFlyout()
+        }
+    }
+
     public func prepare() throws {
         try TeamsUI.exclusive { try accessibility.ensureHealthy() }
     }
@@ -238,10 +259,32 @@ public final class TeamsAXTarget: PresenceTarget {
             return
         }
         guard let keys = try? keyboard() else { return }
-        keys.send(.escape)
-        _ = AXPoll.wait(timeout: 1.5) {
-            TeamsSelectors.ourStatusSurfaces.allSatisfy { $0.find(in: app) == nil }
+
+        // Escape, then *check*, then Escape again.
+        //
+        // A single unverified Escape was leaving the profile menu open on screen from time
+        // to time. Chromium throttles input to an occluded window and silently drops the
+        // key, which is the same reason `dismissStaleDialog` raises before pressing — and
+        // this is the one path that deliberately does not raise, because raising is what
+        // users see as the app foregrounding Teams.
+        //
+        // So it retries instead of raising: cheap, invisible, and it fixes the common case
+        // where the first press is dropped. When every attempt is dropped the flyout is
+        // left for `ensureHealthy`, which may raise — the loud recovery stays the last
+        // resort rather than the first move.
+        for attempt in 1...3 {
+            keys.send(.escape)
+            let closed = AXPoll.wait(timeout: 1.0) {
+                TeamsSelectors.ourStatusSurfaces.allSatisfy { $0.find(in: app) == nil }
+            }
+            if closed {
+                if attempt > 1 {
+                    Log.debug(Log.teams, "closeFlyout: closed after \(attempt) Escape attempts")
+                }
+                return
+            }
         }
+        Log.teams.warning("closeFlyout: the status flyout is still open after 3 Escape attempts")
     }
 
     // MARK: - Reading
@@ -296,6 +339,31 @@ public final class TeamsAXTarget: PresenceTarget {
         return try body()
     }
 
+    /// Where a status write got to. Logged on failure so a stuck write names its own
+    /// transition instead of leaving us to guess from the outside.
+    ///
+    /// Carries no status text, track name or account detail — only which step, which
+    /// selector, and whether the control responded.
+    enum WriteStep: String {
+        case ensureHealthy, openFlyout, findStatusEntry, openEditor, findComposeBox
+        case replaceText, showWhenMessaged, clearAfter, commit, readback, closeFlyout
+    }
+
+    private func step<T>(_ step: WriteStep, _ body: () throws -> T) throws -> T {
+        let started = Date()
+        do {
+            let value = try body()
+            Log.debug(Log.teams, "write step \(step.rawValue): ok in \(Int(Date().timeIntervalSince(started) * 1000))ms")
+            return value
+        } catch {
+            let ms = Int(Date().timeIntervalSince(started) * 1000)
+            // Deliberately not the status text: the step and the selector are what
+            // diagnose a stuck write, and the content is the user's.
+            Log.teams.error("write FAILED at step \(step.rawValue, privacy: .public) after \(ms, privacy: .public)ms: \(String(describing: error), privacy: .public)")
+            throw error
+        }
+    }
+
     private func applyOnce(status: String) throws {
         lastWarnings = []
 
@@ -317,16 +385,18 @@ public final class TeamsAXTarget: PresenceTarget {
         var committed = false
         defer { if !committed { closeFlyout() } }
 
-        try timed("openFlyout") { try openProfileFlyout() }
-        try timed("openEditor") { try openStatusEditor() }
+        try step(.openFlyout) { try openProfileFlyout() }
+        try step(.openEditor) { try openStatusEditor() }
 
-        let compose = try require(TeamsSelectors.composeBox, stage: "locating the status field")
-        try timed("replaceText") { try replaceText(in: compose, with: target) }
+        let compose = try step(.findComposeBox) {
+            try require(TeamsSelectors.composeBox, stage: "locating the status field")
+        }
+        try step(.replaceText) { try replaceText(in: compose, with: target) }
 
         timed("showWhenMessaged") { applyShowWhenMessaged() }
-        try timed("clearAfter") { try applyClearAfter() }
+        try step(.clearAfter) { try applyClearAfter() }
 
-        try timed("commit") { try commit(expecting: target) }
+        try step(.commit) { try commit(expecting: target) }
         committed = true   // commit() closes the flyout itself
     }
 

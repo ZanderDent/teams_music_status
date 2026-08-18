@@ -61,6 +61,20 @@ public final class PresenceCoordinator: ObservableObject {
         target.clearAfter = settings.clearAfter
         target.showWhenMessaged = settings.showWhenMessaged
         observeTeamsLifecycle()
+
+        // Tidy up after a previous run before doing anything else.
+        //
+        // A crash, a force quit or an update installed mid-write can leave the Teams status
+        // flyout open. Nothing used to close it: repair only happened as a side effect of
+        // needing to write, and a relaunched instance usually has nothing to write because
+        // the status it restored from disk already matches what is playing. The flyout then
+        // sat open on screen indefinitely.
+        //
+        // Off the main actor because it touches the accessibility tree, and it is a no-op
+        // whenever no flyout of ours is open.
+        Task.detached(priority: .utility) { [target] in
+            target.closeAbandonedFlyout()
+        }
     }
 
     deinit {
