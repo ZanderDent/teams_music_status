@@ -334,11 +334,33 @@ hdiutil create -srcfolder "$DMG_ROOT" -volname "$VOLNAME" -fs HFS+ \
   -format UDRW -ov "$RW_DMG" >/dev/null
 ok "read-write image created"
 
-# Cosmetic Finder layout. Best-effort: it needs Automation permission for Finder, which
-# a fresh machine or a CI runner will not have. A plain but correct DMG is far better
-# than a failed release, so this never aborts the build.
-MOUNT_DIR="$(mktemp -d)"
-if hdiutil attach "$RW_DMG" -mountpoint "$MOUNT_DIR" -nobrowse -noautoopen >/dev/null 2>&1; then
+# Finder layout: window size, icon positions and the background with its arrow.
+#
+# Best-effort by design. It drives Finder over Apple Events, which a fresh machine or a
+# CI runner has no permission for, and a plain but correct DMG beats a failed release.
+# The warning is loud though, because an unstyled DMG is the first thing every user sees:
+# icons land wherever Finder feels like, in the wrong order, with no arrow.
+# Mount at the DEFAULT location, not a temporary directory.
+#
+# This cost the DMG its layout for every release built so far. Finder's `disk "NAME"`
+# only resolves volumes under /Volumes, so mounting at a mktemp path made every layout
+# attempt fail with "Can't get disk" (-1728) — which the code then reported as missing
+# Automation permission. The permission was never the problem, and the misleading warning
+# is why it went unfixed: the DMG shipped with icons wherever Finder felt like putting
+# them, in the wrong order, with no arrow.
+#
+# -nobrowse is dropped for the same reason: it hides the volume from Finder.
+hdiutil detach "/Volumes/$VOLNAME" -force >/dev/null 2>&1 || true
+MOUNT_DIR="/Volumes/$VOLNAME"
+if hdiutil attach "$RW_DMG" -noautoopen >/dev/null 2>&1; then
+  # Finder needs a moment to notice a freshly mounted volume.
+  sleep 2
+  # The background has to live inside the image, and hidden, or it shows up as a file in
+  # the window next to the app.
+  if [ -f "$DMG_BACKGROUND" ]; then
+    mkdir -p "$MOUNT_DIR/.background"
+    cp "$DMG_BACKGROUND" "$MOUNT_DIR/.background/background.tiff"
+  fi
   if osascript >/dev/null 2>&1 <<APPLESCRIPT
 tell application "Finder"
   tell disk "$VOLNAME"
@@ -350,6 +372,7 @@ tell application "Finder"
     set theViewOptions to the icon view options of container window
     set arrangement of theViewOptions to not arranged
     set icon size of theViewOptions to 128
+    set background picture of theViewOptions to file ".background:background.tiff"
     set position of item "$RELEASE_APP_NAME" of container window to {150, 200}
     set position of item "Applications" of container window to {450, 200}
     update without registering applications
@@ -361,7 +384,7 @@ APPLESCRIPT
   then
     ok "Finder layout applied"
   else
-    warn "could not set the Finder layout (needs Automation permission for Finder); the DMG is still valid"
+    warn "could not set the Finder layout; the DMG is valid but will look unstyled. Check Automation permission for Finder, and that /Volumes/$VOLNAME mounted."
   fi
   sync
   hdiutil detach "$MOUNT_DIR" >/dev/null 2>&1 || hdiutil detach "$MOUNT_DIR" -force >/dev/null 2>&1 || true
