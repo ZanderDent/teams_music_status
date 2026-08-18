@@ -17,7 +17,31 @@ struct MenuBarContentView: View {
         return false
     }
 
+    /// Quit has to stay reachable when things are going wrong, which is exactly when it
+    /// stopped being reachable.
+    ///
+    /// The panel had no height limit and no scroll view, so it grew with its content. Add
+    /// a configuration warning and a couple of write warnings -- the state someone is in
+    /// when they most want to quit -- and the footer holding Settings and Quit was pushed
+    /// off the bottom of the screen. Reported from a second machine as "no way to close
+    /// the app without Activity Monitor", which was accurate: there was no other way out.
+    ///
+    /// The content now scrolls within a bound, and the footer sits outside it. No amount
+    /// of warnings can push it away.
     var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            ScrollView(.vertical) { scrollingContent.padding(14) }
+                .frame(maxHeight: 460)
+            Divider()
+            footer
+                .padding(.horizontal, 14)
+                .padding(.vertical, 10)
+        }
+        .frame(width: 320)
+        .task { await environment.performStartupChecks() }
+    }
+
+    private var scrollingContent: some View {
         VStack(alignment: .leading, spacing: 0) {
             header
             Divider().padding(.vertical, 8)
@@ -45,12 +69,7 @@ struct MenuBarContentView: View {
 
             Divider().padding(.vertical, 8)
             controls
-            Divider().padding(.vertical, 8)
-            footer
         }
-        .padding(14)
-        .frame(width: 320)
-        .task { await environment.performStartupChecks() }
     }
 
     // MARK: Header

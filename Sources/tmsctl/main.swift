@@ -160,13 +160,26 @@ case "spotify":
     }
     printHeader("Spotify — \(source.displayName)")
     let semaphore = DispatchSemaphore(value: 0)
-    var result: Result<TrackPresence?, Error> = .success(nil)
+    // No default "success with no playback".
+    //
+    // This started as `.success(nil)`, with the wait result discarded. Any read that had
+    // not finished in time therefore printed "no active playback" -- a reading this tool
+    // invented rather than observed, indistinguishable from Spotify genuinely being idle.
+    // It made the Local source look unreliable in exactly the diagnostic used to judge it.
+    var result: Result<TrackPresence?, Error>?
     Task {
         do { result = .success(try await source.fetch()) }
         catch { result = .failure(error) }
         semaphore.signal()
     }
-    _ = semaphore.wait(timeout: .now() + 40)
+    if semaphore.wait(timeout: .now() + 40) == .timedOut {
+        print("✗ timed out after 40s waiting for \(source.displayName)")
+        exit(1)
+    }
+    guard let result else {
+        print("✗ the source returned without a result — please report this")
+        exit(1)
+    }
     switch result {
     case .success(let presence):
         if let presence {

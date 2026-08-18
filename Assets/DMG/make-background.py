@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Build the DMG window background: dark plate, arrow, and a one-line instruction.
+"""Build the DMG window background: light plate, arrow, and a one-line instruction.
 
     python3 Assets/DMG/make-background.py
 
@@ -20,11 +20,21 @@ HERE = Path(__file__).resolve().parent
 W, H = 600, 420
 APP_X, APPS_X, ICON_Y = 150, 450, 200
 
-# Same palette as the app icon, so the DMG and the icon read as one piece of design.
-TOP = (32, 29, 66)
-BOTTOM = (16, 14, 34)
-ARROW = (150, 140, 235)
-TEXT = (150, 148, 178)
+# Light, deliberately, despite the app icon being dark.
+#
+# Finder draws icon labels in a colour chosen by the system appearance, not by what is
+# behind them: black in Light mode, white in Dark. A background cannot satisfy both, and
+# the first version of this was dark -- which rendered the "Teams Music Status" and
+# "Applications" labels in black on near-black for every user in Light mode. Reported
+# from a second machine as "the text under each icon is black instead of white".
+#
+# Light loses less: Light is the more common default, and a white label on a light plate
+# in Dark mode is still legible, where black on near-black was not legible at all. The
+# indigo is carried by the arrow and the wordmark instead of the field.
+TOP = (247, 246, 251)
+BOTTOM = (232, 230, 243)
+ARROW = (99, 91, 195)
+TEXT = (74, 71, 102)
 
 
 def render(scale: int) -> Image.Image:
