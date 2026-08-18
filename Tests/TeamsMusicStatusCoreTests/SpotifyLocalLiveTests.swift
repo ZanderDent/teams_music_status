@@ -21,12 +21,12 @@ final class SpotifyLocalLiveTests: XCTestCase {
 
     /// 300 synchronous reads through the production path. Any throw is a failure; so is
     /// any reading that claims silence while Spotify is playing.
-    func testThreeHundredProductionReads() throws {
+    func testTwoThousandProductionReads() throws {
         var playing = 0, paused = 0, silent = 0
         var failures: [String] = []
         var latencies: [TimeInterval] = []
 
-        for _ in 0..<300 {
+        for _ in 0..<2000 {
             let started = Date()
             do {
                 let reading = try SpotifyLocalSource.readSynchronously()
@@ -45,13 +45,13 @@ final class SpotifyLocalLiveTests: XCTestCase {
         let median = sorted.isEmpty ? 0 : sorted[sorted.count / 2]
         let worst = sorted.last ?? 0
         print("""
-          300 production reads — playing=\(playing) paused=\(paused) silent=\(silent) \
+          2000 production reads — playing=\(playing) paused=\(paused) silent=\(silent) \
           failures=\(failures.count)
           latency median=\(Int(median * 1000))ms worst=\(Int(worst * 1000))ms
         """)
         if let first = failures.first { print("  first failure: \(first)") }
 
-        XCTAssertTrue(failures.isEmpty, "\(failures.count)/300 reads failed: \(failures.prefix(3))")
+        XCTAssertTrue(failures.isEmpty, "\(failures.count)/2000 reads failed: \(failures.prefix(3))")
         XCTAssertEqual(silent, 0, "reported silence \(silent) times while Spotify was playing")
     }
 

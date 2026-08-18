@@ -49,20 +49,6 @@ public enum LocalPlaybackReading: Equatable, Sendable {
 /// * It needs the Automation (Apple Events) permission, prompted on first use — so it is
 ///   only ever touched once the user has actually selected this source.
 /// * It depends on Spotify continuing to ship its scripting dictionary.
-/// One-shot ownership, so exactly one of "the read finished" and "the deadline passed"
-/// resumes the continuation. Resuming a checked continuation twice is a hard crash.
-private final class ManagedAtomicFlag: @unchecked Sendable {
-    private let lock = NSLock()
-    private var taken = false
-    /// True for the first caller only.
-    func takeOwnership() -> Bool {
-        lock.lock(); defer { lock.unlock() }
-        if taken { return false }
-        taken = true
-        return true
-    }
-}
-
 public final class SpotifyLocalSource: PresenceSource {
 
     public let kind: PresenceSourceKind = .spotifyLocal
@@ -72,12 +58,35 @@ public final class SpotifyLocalSource: PresenceSource {
 
     public static let bundleIdentifier = "com.spotify.client"
 
-    /// How long one read may take before it is called a timeout rather than waited on.
+    /// How long a *settled* read may take before it is called a timeout.
     ///
-    /// A hung Apple Event once blocked a caller for over forty seconds. Generous enough
-    /// that a busy Spotify still answers — measured reads complete in tens of
-    /// milliseconds — and short enough that a poll loop is never wedged by one.
+    /// A hung Apple Event once blocked a caller for over forty seconds. Generous next to
+    /// the measured cost — 300 consecutive reads in a warm process ran at a 5ms median,
+    /// 210ms worst — and short enough that a poll loop is never wedged.
     public static let readTimeout: TimeInterval = 5
+
+    /// The first read in a process gets much longer.
+    ///
+    /// Establishing the Apple Event connection and having TCC evaluate the Automation
+    /// grant happens once per process and is far slower than any read afterwards. Measured
+    /// with a fresh process per read, a 5s limit rejected 4 of 15 attempts — while 300
+    /// reads in one warm process had a 5ms median and no failures at all. The old limit
+    /// was timing the cold start, not the read.
+    public static let firstReadTimeout: TimeInterval = 20
+
+    /// Cold until the first read in this process completes. Serialised by `stateLock`.
+    private static let stateLock = NSLock()
+    private static var hasCompletedAReadInThisProcess = false
+
+    static func currentTimeout() -> TimeInterval {
+        stateLock.lock(); defer { stateLock.unlock() }
+        return hasCompletedAReadInThisProcess ? readTimeout : firstReadTimeout
+    }
+
+    static func markReadCompleted() {
+        stateLock.lock(); defer { stateLock.unlock() }
+        hasCompletedAReadInThisProcess = true
+    }
 
     /// One round trip returns everything; querying properties one at a time is far slower
     /// and can also tear — state read before a track change, metadata read after it.
@@ -126,24 +135,27 @@ public final class SpotifyLocalSource: PresenceSource {
     /// Apple Event), so it is left to finish and its result discarded. What this bounds is
     /// how long the *caller* waits, which is what the poll loop needs.
     public func read() async throws -> LocalPlaybackReading {
-        try await withCheckedThrowingContinuation { continuation in
-            let resumed = ManagedAtomicFlag()
-            let deadline = DispatchTime.now() + Self.readTimeout
-
-            // NSAppleScript is not thread-safe and blocks; keep it off the caller's actor.
+        let timeout = Self.currentTimeout()
+        return try await withCheckedThrowingContinuation { continuation in
+            // Off the caller's actor: the UI must never wait on Spotify. The work itself
+            // runs on `SpotifyScriptRunner`'s dedicated run-loop thread, which is what
+            // gives the Apple Event's reply somewhere to be delivered, and which
+            // serialises reads so a hung one cannot be joined by others.
             DispatchQueue.global(qos: .utility).async {
-                do {
-                    let reading = try Self.readSynchronously()
-                    if resumed.takeOwnership() { continuation.resume(returning: reading) }
-                } catch {
-                    if resumed.takeOwnership() { continuation.resume(throwing: error) }
+                let outcome = SpotifyScriptRunner.shared.run(timeout: timeout) {
+                    Result { try Self.readSynchronously() }
                 }
-            }
-
-            DispatchQueue.global(qos: .utility).asyncAfter(deadline: deadline) {
-                if resumed.takeOwnership() {
-                    Log.spotify.error("local Spotify read exceeded \(Self.readTimeout, privacy: .public)s")
-                    continuation.resume(throwing: PresenceSourceError.timedOut(seconds: Self.readTimeout))
+                guard let outcome else {
+                    Log.spotify.error("local Spotify read exceeded \(timeout, privacy: .public)s")
+                    continuation.resume(throwing: PresenceSourceError.timedOut(seconds: timeout))
+                    return
+                }
+                switch outcome {
+                case .success(let reading):
+                    Self.markReadCompleted()
+                    continuation.resume(returning: reading)
+                case .failure(let error):
+                    continuation.resume(throwing: error)
                 }
             }
         }

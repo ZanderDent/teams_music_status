@@ -164,6 +164,7 @@ case "spotify":
     // active playback" hid the difference between Spotify being stopped, not running, and
     // an Apple Event that failed -- the exact conflation this source was fixed to remove.
     if useLocal {
+        let tStart = Date()
         let localSem = DispatchSemaphore(value: 0)
         var reading: Result<LocalPlaybackReading, Error>?
         Task {
@@ -171,7 +172,23 @@ case "spotify":
             catch { reading = .failure(error) }
             localSem.signal()
         }
-        if localSem.wait(timeout: .now() + 20) == .timedOut {
+        // Pump the main run loop instead of blocking it.
+        //
+        // A blocked main thread appears to starve Apple Event reply delivery: with
+        // `semaphore.wait()` here, roughly one cold run in six never returned and hit the
+        // full deadline, while the identical script on a free main thread completed 20/20
+        // in ~200ms. A GUI app always has a live main run loop, so this is a property of
+        // command-line callers rather than of the source.
+        let deadline = Date().addingTimeInterval(20)
+        var waited: DispatchTimeoutResult = .success
+        while reading == nil {
+            if Date() >= deadline { waited = .timedOut; break }
+            RunLoop.current.run(mode: .default, before: Date().addingTimeInterval(0.02))
+        }
+        if ProcessInfo.processInfo.environment["TMS_TIMING"] == "1" {
+            FileHandle.standardError.write("  bridge total: \(Int(Date().timeIntervalSince(tStart) * 1000))ms\n".data(using: .utf8)!)
+        }
+        if waited == .timedOut {
             print("✗ timed out after 20s reading the local Spotify app"); exit(1)
         }
         switch reading {
