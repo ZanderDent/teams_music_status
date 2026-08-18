@@ -22,6 +22,8 @@ cd "$(dirname "$0")/.."
 ROOT="$PWD"
 
 APP_NAME="TeamsMusicStatus"
+# The name macOS shows: the login item and System Settings both use this, not APP_NAME.
+DISPLAY_NAME="Teams Music Status"
 # Every place the app can legitimately live. Release DMG installs use the display
 # name in /Applications; development builds use the compact name in build/.
 # Missing these would leave the installed app behind after an "uninstall".
@@ -79,10 +81,36 @@ else
 fi
 
 step "Removing the launch-at-login registration"
-# SMAppService keeps its record keyed on the bundle; unregistering needs the app itself,
-# so the best we can do from a script is clear the legacy job label if one exists.
-launchctl bootout "gui/$(id -u)/$BUNDLE_ID" >/dev/null 2>&1 \
-  && ok "login item removed" || skip "no login item registered"
+# Two mechanisms, because the app can be registered under either and they are invisible
+# to each other. Both run BEFORE the bundle is deleted: a login item left pointing at a
+# missing app makes macOS complain at every login, and it is harder to address once the
+# thing it names no longer exists.
+REMOVED_LOGIN_ITEM=0
+
+# 1. The legacy launchd job label.
+if launchctl bootout "gui/$(id -u)/$BUNDLE_ID" >/dev/null 2>&1; then
+  REMOVED_LOGIN_ITEM=1
+fi
+
+# 2. The SMAppService registration, which is what the app actually uses.
+#
+# Unregistering it properly needs the app to call SMAppService.unregister() itself, which
+# a shell script cannot do -- and the launchctl call above does not see it at all. That
+# gap shipped: an uninstall reported "no login item registered" while System Settings went
+# on listing one, pointing at an application that had just been deleted.
+if osascript -e 'tell application "System Events" to get the name of every login item' 2>/dev/null \
+     | tr ',' '\n' | grep -qi "$DISPLAY_NAME"; then
+  osascript -e "tell application \"System Events\" to delete (every login item whose name is \"$DISPLAY_NAME\")" >/dev/null 2>&1
+  # Verify rather than assume: this is exactly the check whose absence hid the bug.
+  if osascript -e 'tell application "System Events" to get the name of every login item' 2>/dev/null \
+       | tr ',' '\n' | grep -qi "$DISPLAY_NAME"; then
+    warn "a '$DISPLAY_NAME' login item is still registered; remove it in System Settings > General > Login Items"
+  else
+    REMOVED_LOGIN_ITEM=1
+  fi
+fi
+
+[ "$REMOVED_LOGIN_ITEM" = "1" ] && ok "login item removed" || skip "no login item registered"
 
 step "Revoking permissions"
 # tccutil resolves the bundle id through LaunchServices, which does not know about an
