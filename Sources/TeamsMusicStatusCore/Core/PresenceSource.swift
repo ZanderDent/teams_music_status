@@ -32,6 +32,15 @@ public enum PresenceSourceError: LocalizedError, Equatable {
     case appNotRunning
     /// Local source only: the Automation (Apple Events) grant was refused.
     case automationPermissionDenied
+    /// Local source only: an Apple Event failed for a reason that is not a permission
+    /// refusal. Carried separately so it can never be mistaken for silence.
+    case appleEventFailure(code: Int, message: String)
+    /// Local source only: the read did not come back in time. A hung Apple Event is not
+    /// evidence that nothing is playing.
+    case timedOut(seconds: TimeInterval)
+    /// The source answered, but not in a shape we understand. A parse failure is a bug
+    /// to fix, never a playback state to act on.
+    case parseFailure(String)
 
     public var errorDescription: String? {
         switch self {
@@ -52,7 +61,13 @@ public enum PresenceSourceError: LocalizedError, Equatable {
             return "The Spotify app is not running on this Mac."
         case .automationPermissionDenied:
             return "Permission to control Spotify was denied. Grant it in "
-                 + "System Settings ▸ Privacy & Security ▸ Automation."
+                 + "System Settings ▸ Privacy & Security ▸ Automation, then reopen this app."
+        case .appleEventFailure(let code, let message):
+            return "Could not read Spotify (Apple Event error \(code)): \(message)"
+        case .timedOut(let seconds):
+            return "Spotify did not answer within \(Int(seconds))s."
+        case .parseFailure(let detail):
+            return "Could not understand Spotify's answer: \(detail)"
         }
     }
 
@@ -60,6 +75,11 @@ public enum PresenceSourceError: LocalizedError, Equatable {
     public var isTransient: Bool {
         switch self {
         case .rateLimited, .network, .serviceError, .appNotRunning: return true
+        // A failed or slow Apple Event usually succeeds on the next poll. Crucially these
+        // are transient *errors*, not "nothing is playing" — the distinction the local
+        // source used to lose.
+        case .appleEventFailure, .timedOut: return true
+        case .parseFailure: return false
         case .notAuthorized, .authorizationExpired, .permissionsMissing, .automationPermissionDenied: return false
         }
     }

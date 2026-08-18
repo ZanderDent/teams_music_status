@@ -220,6 +220,13 @@ public final class PresenceCoordinator: ObservableObject {
         guard isEnabled else { return }
 
         // 1. Read the source.
+        //
+        // A failed read returns *before the engine is stepped*, and that is the resilience
+        // mechanism: the engine never sees a reading at all, so its idle clock does not
+        // start, `lastWrittenByApp` is untouched, and whatever is on Teams stays there.
+        // One failed Apple Event therefore cannot begin winding down toward restoring the
+        // user's previous status. It takes a genuine observation of silence — Spotify
+        // stopped, or not running — to do that.
         let presence: TrackPresence?
         do {
             presence = try await source.fetch()
@@ -356,6 +363,20 @@ public final class PresenceCoordinator: ObservableObject {
             state = .noPlayback
         case .automationPermissionDenied:
             state = .spotifyAutomationDenied
+        case .appleEventFailure(let code, let message):
+            // Deliberately NOT .noPlayback. A failed Apple Event says nothing about what
+            // Spotify is playing, and treating it as silence starts the pause grace and
+            // can end with the user's status being restored over a track that never
+            // stopped.
+            consecutiveFailures += 1
+            state = .spotifyUnreachable("Apple Event error \(code): \(message)")
+        case .timedOut(let seconds):
+            consecutiveFailures += 1
+            state = .spotifyUnreachable("Spotify did not answer within \(Int(seconds))s")
+        case .parseFailure(let detail):
+            // A shape we do not understand is a bug, not a playback state. Surface it.
+            consecutiveFailures += 1
+            state = .spotifyUnreachable("unreadable answer from Spotify: \(detail)")
         }
     }
 

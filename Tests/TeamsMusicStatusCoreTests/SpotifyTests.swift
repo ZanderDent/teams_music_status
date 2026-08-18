@@ -129,37 +129,23 @@ final class SpotifyWebAPITests: XCTestCase {
 }
 
 /// The AppleScript source's parsing, which has to cope with a tab-delimited string.
-final class SpotifyLocalSourceTests: XCTestCase {
-
-    func testParsesATabDelimitedReading() {
-        let presence = SpotifyLocalSource.parse(
-            "playing\tDefine\tDom Dolla\tDefine\tspotify:track:3B1Je3rlEac3p4ikYW13zw")
-        XCTAssertEqual(presence?.trackName, "Define")
-        XCTAssertEqual(presence?.artists, ["Dom Dolla"])
-        XCTAssertEqual(presence?.albumName, "Define")
-        XCTAssertEqual(presence?.isPlaying, true)
-        XCTAssertEqual(presence?.trackID, "3B1Je3rlEac3p4ikYW13zw")
-    }
-
-    func testPausedIsReportedAsNotPlaying() {
-        let presence = SpotifyLocalSource.parse("paused\tDreams\tFleetwood Mac\tRumours\tspotify:track:x")
-        XCTAssertEqual(presence?.isPlaying, false)
-    }
-
-    func testSentinelsMeanNoPlayback() {
-        XCTAssertNil(SpotifyLocalSource.parse("NOTRUNNING"))
-        XCTAssertNil(SpotifyLocalSource.parse("STOPPED"))
-        XCTAssertNil(SpotifyLocalSource.parse(""))
-    }
-
-    func testTruncatedOutputIsRejectedRatherThanMisread() {
-        XCTAssertNil(SpotifyLocalSource.parse("playing\tDreams"))
-    }
+/// Superseded by `SpotifyLocalSourceTests.swift`, which covers the same ground against
+/// the reading-based API. Kept here only for the cases about text handling, which are
+/// about the parser rather than the error model.
+final class SpotifyLocalTextTests: XCTestCase {
 
     /// Track names legitimately contain unusual characters; only tabs are structural.
-    func testTrackNamesWithPunctuationSurvive() {
-        let presence = SpotifyLocalSource.parse(
-            "playing\tTake me back to 97’ — Remix\tCody Wong\tAlbum\tspotify:track:y")
-        XCTAssertEqual(presence?.trackName, "Take me back to 97’ — Remix")
+    func testTrackNamesWithPunctuationSurvive() throws {
+        let reading = try SpotifyLocalSource.parse(
+            "playing\tTake me back to 97\u{2019} \u{2014} Remix\tCody Wong\tAlbum\tspotify:track:y")
+        XCTAssertEqual(reading.presence?.trackName, "Take me back to 97\u{2019} \u{2014} Remix")
+    }
+
+    func testTabSeparatedFieldsAreReadPositionally() throws {
+        let reading = try SpotifyLocalSource.parse(
+            "playing\tDefine\tDom Dolla\tDefine\tspotify:track:3B1Je3rlEac3p4ikYW13zw")
+        XCTAssertEqual(reading.presence?.trackName, "Define")
+        XCTAssertEqual(reading.presence?.artists, ["Dom Dolla"])
+        XCTAssertEqual(reading.presence?.trackID, "3B1Je3rlEac3p4ikYW13zw")
     }
 }

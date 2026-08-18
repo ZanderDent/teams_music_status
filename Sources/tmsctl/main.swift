@@ -159,6 +159,40 @@ case "spotify":
                                                    redirectURI: AppConfiguration.spotifyRedirectURI)))
     }
     printHeader("Spotify — \(source.displayName)")
+
+    // For the local source, print the explicit reading rather than flattening it. "no
+    // active playback" hid the difference between Spotify being stopped, not running, and
+    // an Apple Event that failed -- the exact conflation this source was fixed to remove.
+    if useLocal {
+        let localSem = DispatchSemaphore(value: 0)
+        var reading: Result<LocalPlaybackReading, Error>?
+        Task {
+            do { reading = .success(try await SpotifyLocalSource().read()) }
+            catch { reading = .failure(error) }
+            localSem.signal()
+        }
+        if localSem.wait(timeout: .now() + 20) == .timedOut {
+            print("✗ timed out after 20s reading the local Spotify app"); exit(1)
+        }
+        switch reading {
+        case .success(let r)?:
+            switch r {
+            case .notRunning: print("state:   Spotify is not running")
+            case .stopped:    print("state:   stopped")
+            case .paused(let t), .playing(let t):
+                print("state:   \(t.isPlaying ? "playing" : "paused")")
+                print("track:   \(t.trackName)")
+                print("artists: \(t.joinedArtists)")
+                print("album:   \(t.albumName ?? "-")")
+                print("render:  \"\(StatusTemplate().render(t))\"")
+            }
+        case .failure(let error)?:
+            print("✗ \(error.localizedDescription)"); exit(1)
+        case nil:
+            print("✗ the source returned without a result — please report this"); exit(1)
+        }
+        exit(0)
+    }
     let semaphore = DispatchSemaphore(value: 0)
     // No default "success with no playback".
     //
