@@ -18,8 +18,9 @@ Teams Music Status, developed by Zander Dent.
 > **Status:** v1.0.0. macOS 14+. Signed with a Developer ID certificate and notarized by
 > Apple, so it installs and opens normally. See [Known limitations](#known-limitations).
 
-<!-- TODO: screenshot of the menu-bar panel, and a short screen recording of a track
-     change updating the Teams status. -->
+![A Teams profile card showing the status message "♪ House Music Till'Death by DJ Windows 7"](docs/images/status-in-teams.webp)
+
+*What your colleagues see: the track you're playing, as your Teams status message.*
 
 ---
 
