@@ -104,28 +104,37 @@ struct OnboardingView: View {
 
     // MARK: Step 2 — Music source
 
+    /// No source picker, and no Spotify sign-in.
+    ///
+    /// Onboarding is Local-only on purpose. The Web API needs a Spotify developer app, and
+    /// Spotify caps those at five hand-allowlisted accounts in development mode — extended
+    /// quota is open only to registered organisations with 250k monthly actives. Offering
+    /// it here would lead most people to a wall. It remains available in Settings for
+    /// anyone who supplies their own client ID.
+    ///
+    /// Reading the local app needs no account, no key and no sign-in — only the macOS
+    /// Automation permission, which the "Check Spotify" button requests by actually
+    /// reading, so the prompt arrives with a reason attached.
     private var sourceStep: some View {
-        step(number: 2, title: "Connect your music", done: model.sourceCheck.isReady) {
+        step(number: 2, title: "Connect Spotify", done: model.sourceCheck.isReady) {
             VStack(alignment: .leading, spacing: 12) {
-                if let problem = model.configurationProblem,
-                   model.settings.sourceKind == .spotifyWebAPI {
-                    calloutRow(icon: "exclamationmark.triangle", tint: .orange, text: problem)
-                }
-
-                Picker("", selection: Binding(
-                    get: { model.settings.sourceKind },
-                    set: { model.settings.sourceKind = $0; model.sourceChanged() }
-                )) {
-                    ForEach(PresenceSourceKind.allCases, id: \.self) { kind in
-                        Text(kind.displayName).tag(kind)
-                    }
-                }
-                .pickerStyle(.radioGroup)
-                .labelsHidden()
-
-                Text(model.settings.sourceKind.summary)
+                Text("Teams Music Status reads what's playing in the Spotify app on this Mac. "
+                     + "No Spotify account setup, no sign-in.")
                     .font(.caption).foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
+
+                if !model.isSpotifyInstalled {
+                    calloutRow(icon: "exclamationmark.triangle", tint: .orange,
+                               text: "The Spotify desktop app isn't installed. Get it from "
+                                   + "spotify.com, then come back to this step.")
+                } else if !model.isSpotifyRunning {
+                    calloutRow(icon: "info.circle", tint: .secondary,
+                               text: "Open Spotify and play something, then choose Check Spotify.")
+                } else {
+                    calloutRow(icon: "lock.shield", tint: .secondary,
+                               text: "macOS will ask for permission to read the currently playing "
+                                   + "track from Spotify. That's the only prompt this step needs.")
+                }
 
                 sourceActions
             }
@@ -135,26 +144,17 @@ struct OnboardingView: View {
     @ViewBuilder
     private var sourceActions: some View {
         HStack(spacing: 10) {
-            if model.needsSpotifySignIn {
-                Button(model.isConnecting ? "Waiting for Spotify…" : "Sign in to Spotify…") {
-                    model.connectSpotify()
-                }
-                .buttonStyle(.borderedProminent)
-                .disabled(model.isConnecting || model.configurationProblem != nil)
-                .accessibilityLabel("Sign in to Spotify")
+            // `.bordered` and `.borderedProminent` are different types, so they cannot
+            // be selected with a ternary inside `.buttonStyle`.
+            let check = Button(checkButtonTitle) { Task { await model.verifySource() } }
+                .disabled(model.sourceCheck == .checking)
+                .accessibilityLabel(checkButtonTitle)
+            if model.sourceCheck.isReady {
+                check.buttonStyle(.bordered)
             } else {
-                // `.bordered` and `.borderedProminent` are different types, so they cannot
-                // be selected with a ternary inside `.buttonStyle`.
-                let check = Button(checkButtonTitle) { Task { await model.verifySource() } }
-                    .disabled(model.sourceCheck == .checking)
-                    .accessibilityLabel(checkButtonTitle)
-                if model.sourceCheck.isReady {
-                    check.buttonStyle(.bordered)
-                } else {
-                    check.buttonStyle(.borderedProminent)
-                }
+                check.buttonStyle(.borderedProminent)
             }
-            if model.isConnecting || model.sourceCheck == .checking {
+            if model.sourceCheck == .checking {
                 ProgressView().controlSize(.small)
             }
         }
@@ -189,7 +189,7 @@ struct OnboardingView: View {
 
     private var checkButtonTitle: String {
         if model.sourceCheck.isReady { return "Check again" }
-        return model.settings.sourceKind == .spotifyLocal ? "Check Spotify Access" : "Check Connection"
+        return model.settings.sourceKind == .spotifyLocal ? "Check Spotify" : "Check Connection"
     }
 
     // MARK: Step 3 — Teams

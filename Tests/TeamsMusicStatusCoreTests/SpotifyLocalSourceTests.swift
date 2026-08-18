@@ -168,3 +168,63 @@ final class SpotifyLocalSourceTests: XCTestCase {
         XCTAssertNil(timedOut, "a timeout must remain distinguishable from observed silence")
     }
 }
+
+/// Changing the default source must not move an existing user off a working configuration.
+@MainActor
+final class SourceMigrationTests: XCTestCase {
+
+    private func defaults(_ name: String) -> UserDefaults {
+        let d = UserDefaults(suiteName: name)!
+        d.removePersistentDomain(forName: name)
+        return d
+    }
+
+    /// Nobody has used this install yet, so the new default applies.
+    func testFreshInstallGetsLocal() {
+        let d = defaults("tms.fresh")
+        let settings = AppSettings(defaults: d)
+        XCTAssertEqual(settings.sourceKind, .spotifyLocal)
+    }
+
+    /// The dangerous case: an existing user who never opened Settings has no stored
+    /// source, and was on the Web API only because that used to be the default. Flipping
+    /// the default would silently downgrade them to local-only playback.
+    func testExistingInstallKeepsTheWebAPI() {
+        let d = defaults("tms.existing")
+        d.set(true, forKey: "hasCompletedOnboarding")
+        let settings = AppSettings(defaults: d)
+        XCTAssertEqual(settings.sourceKind, .spotifyWebAPI,
+                       "an existing user must not be moved to a different source")
+        XCTAssertEqual(d.string(forKey: "sourceKind"), "spotifyWebAPI",
+                       "the choice must be written down so it survives later default changes")
+    }
+
+    /// An explicit choice always wins, in either direction.
+    func testAnExplicitChoiceIsNeverOverwritten() {
+        let d = defaults("tms.chose.local")
+        d.set(true, forKey: "hasCompletedOnboarding")
+        d.set("spotifyLocal", forKey: "sourceKind")
+        XCTAssertEqual(AppSettings(defaults: d).sourceKind, .spotifyLocal)
+
+        let d2 = defaults("tms.chose.web")
+        d2.set("spotifyWebAPI", forKey: "sourceKind")
+        XCTAssertEqual(AppSettings(defaults: d2).sourceKind, .spotifyWebAPI)
+    }
+
+    /// Someone part-way through onboarding is better served by the new default than by
+    /// inheriting a path that cannot work for them.
+    func testPartwayThroughOnboardingGetsLocal() {
+        let d = defaults("tms.partway")
+        d.set(false, forKey: "hasCompletedOnboarding")
+        XCTAssertEqual(AppSettings(defaults: d).sourceKind, .spotifyLocal)
+    }
+
+    /// Migration must be idempotent — it runs on every launch.
+    func testMigrationIsStableAcrossRelaunches() {
+        let d = defaults("tms.repeat")
+        d.set(true, forKey: "hasCompletedOnboarding")
+        XCTAssertEqual(AppSettings(defaults: d).sourceKind, .spotifyWebAPI)
+        XCTAssertEqual(AppSettings(defaults: d).sourceKind, .spotifyWebAPI)
+        XCTAssertEqual(AppSettings(defaults: d).sourceKind, .spotifyWebAPI)
+    }
+}

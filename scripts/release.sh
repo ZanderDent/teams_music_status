@@ -58,6 +58,24 @@ die()   { printf '    \033[31m✗ %s\033[0m\n' "$*" >&2; exit 1; }
 read_version
 resolve_client_id
 
+# A public build must not carry the maintainer's Spotify client ID.
+#
+# `resolve_client_id` finds Config/Spotify.plist and .env, which exist on a maintainer's
+# machine for development. Shipping what it finds would put one person's credential in
+# every download — and it would not even help: Spotify serves five hand-allowlisted
+# accounts per development-mode app and refuses everyone else with a 403.
+#
+# So distributable modes drop it unless the operator explicitly asks otherwise. Set
+# EMBED_SPOTIFY_CLIENT_ID=1 only for a private build of your own.
+case "$MODE" in
+  signed|notarize)
+    if [ -n "${CLIENT_ID:-}" ] && [ "${EMBED_SPOTIFY_CLIENT_ID:-0}" != "1" ]; then
+      CLIENT_ID=""
+      export CLIENT_ID
+    fi
+    ;;
+esac
+
 DIST="$ROOT/dist"
 STAGE="$ROOT/dist/stage"
 APP="$STAGE/$RELEASE_APP_NAME"
@@ -88,17 +106,22 @@ plutil -lint "$ENTITLEMENTS" >/dev/null || die "entitlements file is not valid p
 grep -q '<!--' "$ENTITLEMENTS" && die "entitlements must not contain XML comments; AMFI rejects them and codesign then signs with none"
 ok "entitlements valid and comment-free"
 
+# A Spotify client ID is OPTIONAL, and public builds ship without one.
+#
+# It used to be fatal to build without it, because the Web API was the default source.
+# It no longer is: Spotify caps a development-mode app at five hand-allowlisted accounts,
+# and extended quota is open only to registered organisations with 250k monthly actives,
+# so a bundled client ID cannot serve the public however it is packaged — it would just
+# fail with a 403 for everyone past the fifth person.
+#
+# The default source reads the local Spotify app, which needs no credential at all. The
+# Web API remains available to anyone who supplies their own client ID in a build of
+# their own, which is the only arrangement Spotify's rules actually permit.
 if [ -z "$CLIENT_ID" ]; then
-  # Releasing an app whose "Connect Spotify" button cannot work is worse than not
-  # releasing, so this is fatal for a real build.
-  if [ "$MODE" = "unsigned" ]; then
-    warn "no Spotify client ID; the released app could not connect Spotify"
-    warn "set SPOTIFY_CLIENT_ID or create Config/Spotify.plist with a ClientID key"
-  else
-    die "no Spotify client ID found. Set SPOTIFY_CLIENT_ID, or create Config/Spotify.plist with a ClientID key. See docs/DISTRIBUTION.md"
-  fi
+  ok "no Spotify client ID embedded (local Spotify source needs none)"
 else
-  ok "Spotify client ID resolved (${#CLIENT_ID} chars)"
+  warn "embedding a Spotify client ID (${#CLIENT_ID} chars) — do NOT do this for a public release"
+  warn "a bundled client ID serves at most 5 allowlisted Spotify accounts"
 fi
 
 GIT_COMMIT="$(git rev-parse --short HEAD 2>/dev/null || echo unknown)"

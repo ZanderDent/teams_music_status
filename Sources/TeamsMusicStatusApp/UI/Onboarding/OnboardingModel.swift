@@ -102,19 +102,62 @@ final class OnboardingModel: ObservableObject {
         }
     }
 
+    /// Whether the Spotify desktop app is even installed. Checked without Apple Events,
+    /// so it cannot launch Spotify or trigger a permission prompt.
+    var isSpotifyInstalled: Bool {
+        NSWorkspace.shared.urlForApplication(withBundleIdentifier: SpotifyLocalSource.bundleIdentifier) != nil
+    }
+
+    var isSpotifyRunning: Bool {
+        !NSRunningApplication.runningApplications(withBundleIdentifier: SpotifyLocalSource.bundleIdentifier).isEmpty
+    }
+
     /// Prove the source works by reading from it.
     ///
-    /// For the local source this is also what triggers the macOS Automation prompt —
-    /// at the moment the user asked for it, rather than silently in a background poll
-    /// where the reason for the prompt would be a mystery.
+    /// For the local source this is also what triggers the macOS Automation prompt — at
+    /// the moment the user asked for it, rather than silently in a background poll where
+    /// the reason for the prompt would be a mystery.
+    ///
+    /// The failure messages are deliberately about what the person can *do*. "no active
+    /// playback" and an Apple Event code are both accurate and both useless to someone who
+    /// just wants their status to work.
     func verifySource() async {
         sourceCheck = .checking
+
+        if settings.sourceKind == .spotifyLocal {
+            guard isSpotifyInstalled else {
+                sourceCheck = .failed("Spotify isn't installed on this Mac. Install the Spotify "
+                                    + "desktop app from spotify.com, then check again.")
+                return
+            }
+            guard isSpotifyRunning else {
+                sourceCheck = .failed("Spotify isn't running. Open Spotify and play something, "
+                                    + "then check again.")
+                return
+            }
+        }
+
         do {
             let presence = try await environment.activeSource.fetch()
             let rendered = presence.map {
                 settings.template.render($0, maskProfanity: settings.maskProfanity)
             }
+            if presence == nil && settings.sourceKind == .spotifyLocal {
+                sourceCheck = .failed("Spotify is open but nothing is playing. Start a track, "
+                                    + "then check again.")
+                return
+            }
             sourceCheck = .ready(nowPlaying: presence?.isPlaying == true ? rendered : nil)
+        } catch PresenceSourceError.automationPermissionDenied {
+            sourceCheck = .failed("macOS is blocking access to Spotify. Open System Settings ▸ "
+                                + "Privacy & Security ▸ Automation, switch on Spotify under "
+                                + "Teams Music Status, then check again.")
+        } catch PresenceSourceError.appNotRunning {
+            sourceCheck = .failed("Spotify isn't running. Open Spotify and play something, "
+                                + "then check again.")
+        } catch PresenceSourceError.timedOut {
+            sourceCheck = .failed("Spotify didn't answer in time. This is usually temporary — "
+                                + "check again in a moment.")
         } catch let error as PresenceSourceError {
             sourceCheck = .failed(error.localizedDescription)
         } catch {

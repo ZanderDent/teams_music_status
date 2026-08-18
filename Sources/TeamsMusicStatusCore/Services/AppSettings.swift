@@ -27,7 +27,7 @@ public final class AppSettings: ObservableObject {
     public init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
         defaults.register(defaults: [
-            Key.sourceKind: PresenceSourceKind.spotifyWebAPI.rawValue,
+            // sourceKind is deliberately NOT registered — see `resolveSourceKind`.
             Key.template: StatusTemplate.defaultTemplate,
             Key.pauseGrace: 300.0,
             Key.debounce: 5.0,
@@ -40,8 +40,7 @@ public final class AppSettings: ObservableObject {
             // organisation, and a track title is not something the user chose.
             Key.maskProfanity: true,
         ])
-        self.sourceKind = PresenceSourceKind(rawValue: defaults.string(forKey: Key.sourceKind) ?? "")
-            ?? .spotifyWebAPI
+        self.sourceKind = Self.resolveSourceKind(defaults)
         self.template = StatusTemplate(defaults.string(forKey: Key.template) ?? StatusTemplate.defaultTemplate)
         self.pauseGrace = defaults.double(forKey: Key.pauseGrace)
         self.debounce = defaults.double(forKey: Key.debounce)
@@ -51,6 +50,44 @@ public final class AppSettings: ObservableObject {
         self.showWhenMessaged = defaults.bool(forKey: Key.showWhenMessaged)
         self.hasCompletedOnboarding = defaults.bool(forKey: Key.hasCompletedOnboarding)
         self.maskProfanity = defaults.bool(forKey: Key.maskProfanity)
+    }
+
+    /// Decide which source this install should use, preserving what an existing user had.
+    ///
+    /// Local Spotify is the default for anyone new, because it is the only source that can
+    /// serve an arbitrary user: a Spotify Web API app in development mode is limited to
+    /// five manually-allowlisted accounts, and extended quota is open only to registered
+    /// organisations with 250k monthly actives. No way of packaging a bundled client ID
+    /// changes that.
+    ///
+    /// But an existing user who never opened Settings has no stored source — they were on
+    /// the Web API only because that used to be the default. Flipping the default would
+    /// silently move them to local-only playback with primary-artist-only metadata, a
+    /// downgrade they did not ask for. So their previous source is written down explicitly
+    /// the first time this runs:
+    ///
+    ///   * fresh install           -> Local
+    ///   * existing, never chose   -> Web API, recorded so later default changes cannot
+    ///                                move them again
+    ///   * chose either explicitly -> left alone
+    ///
+    /// `sourceKind` is deliberately absent from `register(defaults:)`. The registration
+    /// domain is process-wide, so a registered value makes `string(forKey:)` non-nil for
+    /// everyone and the question "has the user ever chosen?" becomes unanswerable — which
+    /// is exactly how the first version of this silently did nothing.
+    ///
+    /// Keyed on `hasCompletedOnboarding` rather than on stored Spotify tokens: someone who
+    /// connected Spotify and later disconnected still expects the source they were using,
+    /// and someone part-way through onboarding is better served by the new default.
+    static func resolveSourceKind(_ defaults: UserDefaults) -> PresenceSourceKind {
+        if let stored = defaults.string(forKey: Key.sourceKind),
+           let kind = PresenceSourceKind(rawValue: stored) {
+            return kind
+        }
+        guard defaults.bool(forKey: Key.hasCompletedOnboarding) else { return .spotifyLocal }
+        defaults.set(PresenceSourceKind.spotifyWebAPI.rawValue, forKey: Key.sourceKind)
+        Log.coordinator.info("preserved the Spotify Web API source for an existing install")
+        return .spotifyWebAPI
     }
 
     @Published public var sourceKind: PresenceSourceKind {
