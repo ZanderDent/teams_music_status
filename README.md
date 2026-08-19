@@ -194,12 +194,18 @@ never sees them and your frontmost app never changes.
 
 Grant it in **System Settings ▸ Privacy & Security ▸ Accessibility**.
 
-### Automation (Apple Events) — only for the local Spotify source
+### Automation (Apple Events) — required on the default setup
 
-Needed only if you choose **Local Spotify**, which reads the Spotify app on this Mac.
-macOS asks the first time it is used, and the app only asks when you actually
-choose to read Spotify — so the prompt arrives with a reason attached. The optional
-Web API source does not need it.
+This is how the app reads the Spotify desktop app, which is the default and the only
+source the setup window offers, so in practice everyone grants it. macOS asks the first
+time — during setup, at the moment you ask the app to check what is playing, so the prompt
+arrives with a reason attached rather than out of nowhere.
+
+Grant it in **System Settings ▸ Privacy & Security ▸ Automation**, under Teams Music
+Status ▸ Spotify.
+
+Only the optional Web API source, configured by hand in Settings, does without it — and
+that one needs your own Spotify developer client ID instead.
 
 ---
 
