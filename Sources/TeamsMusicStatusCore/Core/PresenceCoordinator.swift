@@ -276,7 +276,7 @@ public final class PresenceCoordinator: ObservableObject {
         Log.debug(Log.coordinator, "tick: enabled=\(self.isEnabled) source=\(self.settings.sourceKind.rawValue) "
                   + "playing=\(presence?.isPlaying == true) interaction=\(input.teamsInteraction) "
                   + "override=\(self.engineState.manualOverrideDetected) owns=\(self.engineState.lastWrittenByApp != nil) "
-                  + "action=\(String(describing: action).prefix(24))")
+                  + "action=\(action.logLabel)")
 
         // 3. Act.
         switch action {

@@ -337,8 +337,38 @@ BLOCKED
     exit 1
   fi
   ok "notarytool credentials found"
-  # The DMG is built first and notarized as the distributable artifact, so the ticket
-  # can be stapled to the thing users actually download.
+
+  # Notarize and staple the *app* before it goes into the DMG, then notarize and staple
+  # the DMG afterwards. Both are required, and stapling only the DMG is the subtle
+  # mistake: the ticket then lives on the container, not on the bundle. A user who drags
+  # the app to /Applications gets a copy carrying a quarantine flag and no ticket, so
+  # Gatekeeper has to ask Apple over the network at first launch. On a machine that is
+  # offline — or behind a filter that blocks Apple's OCSP endpoint — that check fails and
+  # the app is refused with "Apple could not verify it is free of malware", on a build
+  # that is in fact perfectly notarized. Stapling the bundle is what makes it work with
+  # no network at all.
+  step "Notarize the app"
+  APP_ZIP="$STAGE/app-for-notarization.zip"
+  rm -f "$APP_ZIP"
+  /usr/bin/ditto -c -k --keepParent "$APP" "$APP_ZIP"
+  APP_SUBMIT_LOG="$STAGE/notary-submit-app.txt"
+  set +e
+  xcrun notarytool submit "$APP_ZIP" --keychain-profile "$NOTARY_PROFILE" --wait \
+    --output-format json > "$APP_SUBMIT_LOG" 2>&1
+  APP_SUBMIT_RC=$?
+  set -e
+  APP_NOTARY_ID="$(/usr/bin/python3 -c 'import json,sys;print(json.load(open(sys.argv[1])).get("id",""))' "$APP_SUBMIT_LOG" 2>/dev/null || true)"
+  APP_NOTARY_STATUS="$(/usr/bin/python3 -c 'import json,sys;print(json.load(open(sys.argv[1])).get("status",""))' "$APP_SUBMIT_LOG" 2>/dev/null || true)"
+  echo "    submission: ${APP_NOTARY_ID:-unknown}    status: ${APP_NOTARY_STATUS:-unknown}"
+  if [ "$APP_NOTARY_STATUS" != "Accepted" ] || [ $APP_SUBMIT_RC -ne 0 ]; then
+    warn "app notarization did not succeed — fetching the log"
+    [ -n "$APP_NOTARY_ID" ] && xcrun notarytool log "$APP_NOTARY_ID" --keychain-profile "$NOTARY_PROFILE" 2>&1 | sed 's/^/    /'
+    die "app notarization failed with status '${APP_NOTARY_STATUS:-unknown}'. This is NOT a releasable artifact."
+  fi
+  rm -f "$APP_ZIP"
+  xcrun stapler staple "$APP" 2>&1 | sed 's/^/    /'
+  xcrun stapler validate "$APP" 2>&1 | sed 's/^/    /'
+  ok "app notarized and stapled — it launches offline once copied out of the DMG"
 fi
 
 # ── DMG ──────────────────────────────────────────────────────────────────────
@@ -449,6 +479,15 @@ if [ "$MODE" = "notarize" ]; then
   xcrun stapler staple "$DMG" 2>&1 | sed 's/^/    /'
   xcrun stapler validate "$DMG" 2>&1 | sed 's/^/    /'
   ok "ticket stapled and validated — the DMG works offline"
+
+  # Guard against shipping a DMG whose ticket is only on the container. Without this the
+  # regression is invisible: every online check still passes, and only a user installing
+  # without network ever sees it.
+  if xcrun stapler validate "$APP" >/dev/null 2>&1; then
+    ok "the app inside the DMG carries its own ticket too"
+  else
+    die "the app has no stapled ticket. It would fail Gatekeeper on an offline first launch."
+  fi
 fi
 
 # ── Gatekeeper ───────────────────────────────────────────────────────────────

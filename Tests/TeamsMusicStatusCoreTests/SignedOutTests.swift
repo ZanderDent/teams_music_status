@@ -221,3 +221,49 @@ final class WrittenStatusFidelityTests: XCTestCase {
                        "re-sanitising what was written must be a no-op, or it can never match")
     }
 }
+
+/// Diagnostic logging must never carry what the user is listening to.
+///
+/// The tick line used to log the action with `String(describing:)`, which prints the
+/// associated value — so enabling diagnostics to report a bug also wrote track and artist
+/// names into a log the user is then asked to paste into a public issue.
+final class DiagnosticRedactionTests: XCTestCase {
+
+    func testWriteActionLogsALengthRatherThanTheStatusText() {
+        let label = SyncEngine.Action.write("♪ Thank Fuck It's The Weekend by Someone").logLabel
+        XCTAssertFalse(label.contains("Weekend"), "track title leaked into the log")
+        XCTAssertFalse(label.contains("Someone"), "artist leaked into the log")
+        XCTAssertTrue(label.hasPrefix("write("), "the decision itself must still be legible")
+        XCTAssertTrue(label.contains("40"), "the length is kept — an empty write is a real symptom")
+    }
+
+    func testRestoreActionLogsNeitherThePreviousStatusNorMisreportsAClear() {
+        let restored = SyncEngine.Action.restore("In a meeting until 3").logLabel
+        XCTAssertFalse(restored.contains("meeting"), "the user's own status leaked into the log")
+        XCTAssertTrue(restored.contains("20"))
+
+        // Restoring "nothing" is a distinct outcome from restoring an empty string, and
+        // conflating them would hide a bug that clears a status it should have kept.
+        XCTAssertEqual(SyncEngine.Action.restore(nil).logLabel, "restore(clear)")
+    }
+
+    func testOverrideActionNeverEchoesWhatWasFoundInTeams() {
+        // The found text is whatever the user typed by hand — the most sensitive thing the
+        // app ever reads, and the case most tempting to log verbatim while debugging.
+        let label = SyncEngine.Action.reportManualOverride(found: "Off sick, call my mobile").logLabel
+        XCTAssertEqual(label, "reportManualOverride")
+    }
+
+    func testEveryActionCaseIsCoveredWithoutFallingBackToDescribing() {
+        let actions: [SyncEngine.Action] = [
+            .doNothing, .write("x"), .restore("y"), .restore(nil), .reportManualOverride(found: "z"),
+        ]
+        for action in actions {
+            let label = action.logLabel
+            XCTAssertFalse(label.isEmpty)
+            // `String(describing:)` on these renders as `write("x")` — quotes are the tell
+            // that a payload was interpolated rather than summarised.
+            XCTAssertFalse(label.contains("\""), "\(label) looks like a raw description")
+        }
+    }
+}

@@ -100,6 +100,22 @@ public struct SyncEngine {
             case .doNothing, .reportManualOverride: return false
             }
         }
+
+        /// The decision, with the status text left out.
+        ///
+        /// Diagnostic logging exists to be pasted into a bug report, so it must not carry
+        /// what the user is listening to. Describing the case alone says everything a
+        /// reader needs — which branch the engine took — while the payload is the one part
+        /// that is nobody else's business. Lengths are kept because "wrote 0 characters"
+        /// is a real symptom.
+        public var logLabel: String {
+            switch self {
+            case .doNothing: return "doNothing"
+            case .write(let text): return "write(\(text.count) chars)"
+            case .restore(let text): return "restore(\(text.map { "\($0.count) chars" } ?? "clear"))"
+            case .reportManualOverride: return "reportManualOverride"
+            }
+        }
     }
 
     /// Everything the engine needs to decide, gathered by the coordinator.
