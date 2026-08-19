@@ -239,8 +239,15 @@ struct OnboardingView: View {
             }
 
             HStack {
+                // Deliberately does NOT record onboarding as complete.
+                //
+                // It used to, which made the label a lie: "later" permanently meant
+                // "never". Anyone who dismissed this to go and grant a permission — the
+                // most likely reason to press it — came back to an app that had silently
+                // decided setup was finished, launched straight to the menu bar, and
+                // offered no route back to this window. Closing with the title-bar button
+                // has always just closed; this now matches it.
                 Button("Set up later") {
-                    model.finish(enableSync: false)
                     onFinish()
                 }
                 .accessibilityLabel("Set up later")

@@ -5,5 +5,5 @@
 # MARKETING_VERSION is what users see (CFBundleShortVersionString).
 # BUILD_NUMBER must increase monotonically for every artifact you publish
 # (CFBundleVersion). Bump it even for a rebuild of the same marketing version.
-MARKETING_VERSION=1.0.0
-BUILD_NUMBER=1
+MARKETING_VERSION=1.0.1
+BUILD_NUMBER=2

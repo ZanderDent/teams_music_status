@@ -232,10 +232,10 @@ means signed but not notarized.
 ### The strongest test: pretend to be a stranger
 
 ```sh
-cp dist/Teams-Music-Status-1.0.0-macOS.dmg /tmp/
+cp dist/Teams-Music-Status-1.0.1-macOS.dmg /tmp/
 xattr -w com.apple.quarantine "0083;$(printf %x $(date +%s));Safari;$(uuidgen)" \
-  /tmp/Teams-Music-Status-1.0.0-macOS.dmg
-open /tmp/Teams-Music-Status-1.0.0-macOS.dmg
+  /tmp/Teams-Music-Status-1.0.1-macOS.dmg
+open /tmp/Teams-Music-Status-1.0.1-macOS.dmg
 ```
 
 Drag the app to Applications and launch it. A notarized build opens normally. An

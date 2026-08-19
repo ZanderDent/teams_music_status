@@ -55,7 +55,7 @@ No screen coordinates.**
 
 ## Install
 
-1. Download `Teams-Music-Status-1.0.0-macOS.dmg` from the
+1. Download `Teams-Music-Status-1.0.1-macOS.dmg` from the
    [latest release](https://github.com/ZanderDent/teams_music_status/releases/latest).
 2. Open the DMG and drag **Teams Music Status** into **Applications**.
 3. Launch it from Applications. It appears in the menu bar as ♪ — there is no Dock icon.
@@ -71,7 +71,7 @@ No screen coordinates.**
 To verify the download:
 
 ```sh
-shasum -a 256 Teams-Music-Status-1.0.0-macOS.dmg
+shasum -a 256 Teams-Music-Status-1.0.1-macOS.dmg
 ```
 
 and compare it with the `.sha256` published alongside the DMG.

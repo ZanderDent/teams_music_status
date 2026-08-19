@@ -221,6 +221,15 @@ struct MenuBarContentView: View {
                 SettingsLink { Text("Settings…") }
                     .controlSize(.small)
                     .accessibilityLabel("Open Settings")
+
+                // Setup has to stay reachable. It is the only place that explains the two
+                // permissions and verifies them by actually using them, and a user who
+                // dismissed it, or who granted a permission after skipping, previously had
+                // no way back to it at all.
+                Button("Set Up…") { AppDelegate.shared?.showOnboarding() }
+                    .controlSize(.small)
+                    .accessibilityLabel("Open setup")
+
                 Spacer()
                 Button("Quit") { NSApplication.shared.terminate(nil) }
                     .controlSize(.small)
