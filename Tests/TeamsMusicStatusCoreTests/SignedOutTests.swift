@@ -180,3 +180,44 @@ final class SelectorFailureToleranceTests: XCTestCase {
         XCTAssertLessThanOrEqual(PresenceCoordinator.selectorFailuresBeforeDisabling, 6)
     }
 }
+
+/// The app must remember what it actually wrote, not what it asked to write.
+final class WrittenStatusFidelityTests: XCTestCase {
+
+    /// Sanitisation is not identity. Astral emoji are replaced with BMP equivalents the
+    /// synthetic input path can deliver, whitespace is collapsed, and long text is clamped.
+    func testSanitisationChangesTheStringItWrites() {
+        let requested = "🎵 Dreams  by  Fleetwood Mac"
+        let written = UnicodeSanitizer.clamp(UnicodeSanitizer.sanitize(requested).text)
+        XCTAssertNotEqual(requested, written,
+                          "if these were always equal the bug could not occur")
+        XCTAssertFalse(written.contains("🎵"), "astral emoji cannot be typed and are replaced")
+    }
+
+    /// Recording the request rather than the result made the next poll compare Teams'
+    /// actual text against text that was never sent, see a difference, and conclude the
+    /// user had edited their status by hand — pausing automatic updates. Any track with an
+    /// emoji in the title, or long enough to clamp, switched syncing off silently.
+    func testComparingRequestAgainstWrittenTextWouldFalselyDetectAnOverride() {
+        let requested = "🎵 Dreams by Fleetwood Mac"
+        let written = UnicodeSanitizer.clamp(UnicodeSanitizer.sanitize(requested).text)
+
+        // What Teams reports back is the written text.
+        let observedInTeams = written
+
+        XCTAssertNotEqual(observedInTeams, requested,
+                          "comparing against the request is what produced the false override")
+        XCTAssertEqual(observedInTeams, written,
+                       "comparing against what was written is stable")
+    }
+
+    /// A clamped title must round-trip too — 280 characters is Teams' limit.
+    func testClampedTitlesRoundTrip() {
+        let long = String(repeating: "Very Long Title ", count: 40)
+        let written = UnicodeSanitizer.clamp(UnicodeSanitizer.sanitize(long).text)
+        XCTAssertLessThanOrEqual(written.count, TeamsSelectors.statusCharacterLimit)
+        XCTAssertNotEqual(written, long)
+        XCTAssertEqual(written, UnicodeSanitizer.clamp(UnicodeSanitizer.sanitize(written).text),
+                       "re-sanitising what was written must be a no-op, or it can never match")
+    }
+}

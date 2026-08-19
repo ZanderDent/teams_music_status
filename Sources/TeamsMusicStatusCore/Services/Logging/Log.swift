@@ -34,6 +34,21 @@ public enum Log {
         guard isDebugEnabled else { return }
         let rendered = message()
         logger.info("[debug] \(rendered, privacy: .public)")
+        mirrorToStandardError(rendered)
+    }
+
+    /// Also write to stderr when running with `TMS_DEBUG=1`.
+    ///
+    /// `os_log` is the right home for these, but it is not always readable: a sandboxed or
+    /// restricted shell gets nothing back from `log show`, which meant the app could be
+    /// misbehaving in front of us with no way to ask it why. Running it from a terminal
+    /// and watching stderr always works.
+    ///
+    /// Same redaction rules apply — this only ever mirrors what was already considered
+    /// safe to log.
+    public static func mirrorToStandardError(_ message: String) {
+        guard isDebugEnabled else { return }
+        FileHandle.standardError.write("[tms] \(message)\n".data(using: .utf8) ?? Data())
     }
 }
 

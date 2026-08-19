@@ -32,6 +32,21 @@ public final class TeamsAXTarget: PresenceTarget {
     /// Non-fatal problems from the most recent write, surfaced to the UI.
     public private(set) var lastWarnings: [String] = []
 
+    /// Exactly what was last committed to Teams, after sanitisation and clamping.
+    ///
+    /// This is not the same string the caller asked for, and the difference matters. The
+    /// text typed into Teams is `UnicodeSanitizer.clamp(sanitize(status))`: astral emoji
+    /// are swapped for BMP equivalents the synthetic input path can actually deliver,
+    /// whitespace is collapsed, and anything past 280 characters is cut.
+    ///
+    /// The coordinator compares what Teams shows against what it believes it wrote, and
+    /// treats a difference as the user having taken over. Recording the *requested* text
+    /// rather than the *written* text therefore made every sanitised write look like a
+    /// manual edit: the next poll saw a mismatch and paused automatic updates. Any track
+    /// with an emoji in its title, or a title long enough to clamp, silently switched
+    /// syncing off.
+    public private(set) var lastAppliedStatus: String?
+
     public init(accessibility: TeamsAccessibility = TeamsAccessibility()) {
         self.accessibility = accessibility
     }
@@ -397,6 +412,7 @@ public final class TeamsAXTarget: PresenceTarget {
         try step(.clearAfter) { try applyClearAfter() }
 
         try step(.commit) { try commit(expecting: target) }
+        lastAppliedStatus = target
         committed = true   // commit() closes the flyout itself
     }
 

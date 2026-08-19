@@ -273,6 +273,10 @@ public final class PresenceCoordinator: ObservableObject {
                                      observedTeamsStatus: nil,
                                      teamsInteraction: currentTeamsInteraction())
         let action = engine.step(state: &engineState, input: input, now: Date())
+        Log.debug(Log.coordinator, "tick: enabled=\(self.isEnabled) source=\(self.settings.sourceKind.rawValue) "
+                  + "playing=\(presence?.isPlaying == true) interaction=\(input.teamsInteraction) "
+                  + "override=\(self.engineState.manualOverrideDetected) owns=\(self.engineState.lastWrittenByApp != nil) "
+                  + "action=\(String(describing: action).prefix(24))")
 
         // 3. Act.
         switch action {
@@ -318,7 +322,11 @@ public final class PresenceCoordinator: ObservableObject {
                 }
 
                 try await runOffMain { try self.target.apply(status: status) }
-                SyncEngine.recordWrite(state: &engineState, status: status,
+                // What Teams actually holds, not what we asked for: sanitisation and
+                // clamping can change the text, and recording the request instead made
+                // the next poll see a mismatch and declare a manual override.
+                let written = target.lastAppliedStatus ?? status
+                SyncEngine.recordWrite(state: &engineState, status: written,
                                        previousTeamsStatus: current, at: Date())
                 restoreStore.save(from: engineState)
                 lastWarnings = target.lastWarnings
