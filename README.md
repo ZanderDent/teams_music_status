@@ -4,6 +4,8 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 ![Platform: macOS 14+](https://img.shields.io/badge/platform-macOS%2014%2B-lightgrey)
 
+**Project site: [zanderdent.com/teams-music-status](https://www.zanderdent.com/teams-music-status)**
+
 Discord-style rich presence for Microsoft Teams on macOS. It shows what you're listening
 to as your Teams custom status message:
 
