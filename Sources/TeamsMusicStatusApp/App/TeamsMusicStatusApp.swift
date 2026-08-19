@@ -92,6 +92,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             // setup open, and if not why not?" is the first question for any report that
             // the app does nothing, and it was previously unanswerable from outside.
             // Names the branch only — no account, status or track information.
+            // Drive the startup checks from launch rather than from a window appearing.
+            // The source repair and the selector self-test both live behind this, and a
+            // first-run user may never open the menu-bar panel that used to be the only
+            // thing that triggered it.
+            Task { await environment.performStartupChecks() }
+
             let decision = OnboardingPolicy.decide(
                 hasCompletedOnboarding: environment.settings.hasCompletedOnboarding,
                 hasAccessibility: TeamsAccessibility.hasAccessibilityPermission)

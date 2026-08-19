@@ -76,7 +76,18 @@ public final class SpotifyAuth {
 
     private static let authorizeURL = URL(string: "https://accounts.spotify.com/authorize")!
     private static let tokenURL = URL(string: "https://accounts.spotify.com/api/token")!
-    private static let keychainAccount = "spotify-oauth-tokens"
+    public static let keychainAccount = "spotify-oauth-tokens"
+    public static let keychainService = "com.zanderdent.TeamsMusicStatus.spotify"
+
+    /// Whether Web API credentials exist, without constructing an auth session.
+    ///
+    /// Read at launch to answer "was this person ever actually using the Web API?" — a
+    /// question the onboarding flag turned out to be unable to answer.
+    public static func hasStoredCredentials(
+        keychain: KeychainStore = KeychainStore(service: SpotifyAuth.keychainService)
+    ) -> Bool {
+        ((try? keychain.data(account: keychainAccount)) ?? nil) != nil
+    }
 
     private let configuration: Configuration
     private let keychain: KeychainStore

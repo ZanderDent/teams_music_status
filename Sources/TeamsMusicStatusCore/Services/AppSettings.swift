@@ -11,6 +11,8 @@ public final class AppSettings: ObservableObject {
 
     private enum Key {
         static let sourceKind = "sourceKind"
+        /// Set only when the *user* picks a source, never by migration.
+        static let sourceChosenExplicitly = "sourceChosenExplicitly"
         static let template = "statusTemplate"
         static let pauseGrace = "pauseGraceSeconds"
         static let debounce = "debounceSeconds"
@@ -40,7 +42,7 @@ public final class AppSettings: ObservableObject {
             // organisation, and a track title is not something the user chose.
             Key.maskProfanity: true,
         ])
-        self.sourceKind = Self.resolveSourceKind(defaults)
+        self.sourceKind = Self.storedSourceKind(defaults)
         self.template = StatusTemplate(defaults.string(forKey: Key.template) ?? StatusTemplate.defaultTemplate)
         self.pauseGrace = defaults.double(forKey: Key.pauseGrace)
         self.debounce = defaults.double(forKey: Key.debounce)
@@ -79,19 +81,90 @@ public final class AppSettings: ObservableObject {
     /// Keyed on `hasCompletedOnboarding` rather than on stored Spotify tokens: someone who
     /// connected Spotify and later disconnected still expects the source they were using,
     /// and someone part-way through onboarding is better served by the new default.
-    static func resolveSourceKind(_ defaults: UserDefaults) -> PresenceSourceKind {
+    /// The source to start with, read from preferences alone.
+    ///
+    /// **No Keychain access.** This runs inside SwiftUI's `@StateObject` construction on
+    /// the main thread during launch, and `SecItemCopyMatching` can block indefinitely on
+    /// securityd — a menu-bar app has no window to host the resulting prompt, so it simply
+    /// hangs with no UI and no logs. `SpotifyAuth.init` documents the same hazard and the
+    /// same reason. Anything that needs credentials happens in `repairSourceKind`, after
+    /// launch, off the main thread.
+    static func storedSourceKind(_ defaults: UserDefaults) -> PresenceSourceKind {
         if let stored = defaults.string(forKey: Key.sourceKind),
            let kind = PresenceSourceKind(rawValue: stored) {
             return kind
         }
-        guard defaults.bool(forKey: Key.hasCompletedOnboarding) else { return .spotifyLocal }
+        return .spotifyLocal
+    }
+
+    /// Apply the credential-dependent migration and repair.
+    ///
+    /// Call once after launch with `hasWebAPICredentials` already determined off the main
+    /// thread. Writes preferences directly rather than through `sourceKind`'s setter,
+    /// because that setter marks the value as the user's explicit choice — and this is the
+    /// app correcting its own state, which is precisely what must stay distinguishable.
+    public func repairSourceKind(hasWebAPICredentials: Bool) {
+        let resolved = Self.resolveSourceKind(defaults,
+                                              hasWebAPICredentials: { hasWebAPICredentials })
+        guard resolved != sourceKind else { return }
+        isApplyingRepair = true
+        sourceKind = resolved
+        isApplyingRepair = false
+    }
+
+    /// True while the app is correcting its own state, so the write below is not mistaken
+    /// for the user picking a source.
+    private var isApplyingRepair = false
+
+    static func resolveSourceKind(
+        _ defaults: UserDefaults,
+        hasWebAPICredentials: () -> Bool = { SpotifyAuth.hasStoredCredentials() }
+    ) -> PresenceSourceKind {
+        if let stored = defaults.string(forKey: Key.sourceKind),
+           let kind = PresenceSourceKind(rawValue: stored) {
+            // Repair an install that was moved to the Web API by the flag above and has no
+            // credentials to use it with — but never one where the user chose it.
+            //
+            // Without that second condition the repair is itself a bug: someone who picks
+            // the Web API in Settings intending to connect next, quits, and relaunches
+            // finds their choice silently reverted, every time. Repair is for state the
+            // app invented, not for decisions the user made. That combination cannot work: the Web API source
+            // without tokens reports "Spotify is not connected" and never contacts Spotify,
+            // so macOS is never asked for Automation and the local path is never reached.
+            // Someone in that state cannot recover by reinstalling, because the stored
+            // source outlives the app, and clearing the onboarding flag alone leaves it in
+            // place. Sending them to the source that needs no setup is the only exit.
+            let chosenByUser = defaults.bool(forKey: Key.sourceChosenExplicitly)
+            if kind == .spotifyWebAPI && !chosenByUser && !hasWebAPICredentials() {
+                defaults.set(PresenceSourceKind.spotifyLocal.rawValue, forKey: Key.sourceKind)
+                Log.coordinator.info("moved to the local source: the stored Web API source has no credentials")
+                return .spotifyLocal
+            }
+            return kind
+        }
+        // Keyed on credentials, not on the onboarding flag.
+        //
+        // The flag was the wrong signal: "Set up later" recorded it without the user
+        // configuring anything, so installs that had never touched the Web API were
+        // migrated onto it. A refresh token is the only real evidence that someone was
+        // using it.
+        guard hasWebAPICredentials() else { return .spotifyLocal }
         defaults.set(PresenceSourceKind.spotifyWebAPI.rawValue, forKey: Key.sourceKind)
-        Log.coordinator.info("preserved the Spotify Web API source for an existing install")
+        Log.coordinator.info("preserved the Spotify Web API source for an install that has credentials")
         return .spotifyWebAPI
     }
 
     @Published public var sourceKind: PresenceSourceKind {
-        didSet { defaults.set(sourceKind.rawValue, forKey: Key.sourceKind) }
+        // Property observers do not run during `init`, so this fires only when something
+        // changes the source *after* launch — which is the user, in Settings. That is what
+        // separates a deliberate choice from a value the migration wrote on their behalf,
+        // and it is what stops the repair below from reverting someone every launch.
+        didSet {
+            defaults.set(sourceKind.rawValue, forKey: Key.sourceKind)
+            if !isApplyingRepair {
+                defaults.set(true, forKey: Key.sourceChosenExplicitly)
+            }
+        }
     }
 
     @Published public var template: StatusTemplate {

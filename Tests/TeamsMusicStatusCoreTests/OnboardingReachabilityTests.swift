@@ -187,3 +187,226 @@ final class OnboardingLaunchRaceTests: XCTestCase {
         XCTAssertFalse(resolves(onAttempt: 100, budget: 20))
     }
 }
+
+/// The second-order damage from the same stale flag.
+///
+/// "Set up later" set `hasCompletedOnboarding`, and the source migration read that flag as
+/// "this person was using the Spotify Web API" and wrote `sourceKind = spotifyWebAPI`
+/// permanently. Installs that had never touched the Web API were silently moved onto a
+/// source they had no credentials for.
+///
+/// The result is worse than a wrong default. The Web API source without tokens reports
+/// "Spotify is not connected" and never contacts Spotify, so no Apple Event is sent, macOS
+/// is never asked for Automation, and the permission the app actually needs is never
+/// requested. Reinstalling does not help — the stored source outlives the app — and
+/// clearing the onboarding flag alone leaves it in place.
+@MainActor
+final class SourceMigrationRepairTests: XCTestCase {
+
+    private func freshDefaults(_ name: String) -> UserDefaults {
+        let defaults = UserDefaults(suiteName: name)!
+        defaults.removePersistentDomain(forName: name)
+        return defaults
+    }
+
+    /// The migration must key on evidence of use, not on the onboarding flag.
+    func testACompletedSetupWithNoCredentialsStaysLocal() {
+        let defaults = freshDefaults("tms.mig.noCreds")
+        defaults.set(true, forKey: "hasCompletedOnboarding")
+        XCTAssertEqual(
+            AppSettings.resolveSourceKind(defaults, hasWebAPICredentials: { false }),
+            .spotifyLocal,
+            "the onboarding flag is not evidence that anyone used the Web API")
+        XCTAssertNil(defaults.string(forKey: "sourceKind"),
+                     "and nothing should have been written")
+    }
+
+    /// A real Web API user is still preserved — the fix must not demote them.
+    func testAnInstallWithCredentialsKeepsTheWebAPI() {
+        let defaults = freshDefaults("tms.mig.creds")
+        defaults.set(true, forKey: "hasCompletedOnboarding")
+        XCTAssertEqual(
+            AppSettings.resolveSourceKind(defaults, hasWebAPICredentials: { true }),
+            .spotifyWebAPI)
+        XCTAssertEqual(defaults.string(forKey: "sourceKind"), "spotifyWebAPI")
+    }
+
+    /// The rescue: an install already carrying the poisoned value.
+    func testAStoredWebAPISourceWithNoCredentialsIsRepaired() {
+        let defaults = freshDefaults("tms.mig.poisoned")
+        defaults.set("spotifyWebAPI", forKey: "sourceKind")   // written by 1.0.0
+
+        XCTAssertEqual(
+            AppSettings.resolveSourceKind(defaults, hasWebAPICredentials: { false }),
+            .spotifyLocal,
+            "a source that cannot work must not be preserved out of politeness")
+        XCTAssertEqual(defaults.string(forKey: "sourceKind"), "spotifyLocal",
+                       "and the repair must persist, or it runs again every launch")
+    }
+
+    /// Repairing must not touch someone whose Web API genuinely works.
+    func testAStoredWebAPISourceWithCredentialsIsLeftAlone() {
+        let defaults = freshDefaults("tms.mig.valid")
+        defaults.set("spotifyWebAPI", forKey: "sourceKind")
+        XCTAssertEqual(
+            AppSettings.resolveSourceKind(defaults, hasWebAPICredentials: { true }),
+            .spotifyWebAPI)
+        XCTAssertEqual(defaults.string(forKey: "sourceKind"), "spotifyWebAPI")
+    }
+
+    /// An explicit local choice is never overridden.
+    func testAnExplicitLocalChoiceSurvives() {
+        let defaults = freshDefaults("tms.mig.local")
+        defaults.set("spotifyLocal", forKey: "sourceKind")
+        XCTAssertEqual(
+            AppSettings.resolveSourceKind(defaults, hasWebAPICredentials: { true }),
+            .spotifyLocal)
+    }
+
+    /// The exact sequence the affected Mac went through, end to end.
+    func testTheReportedUpgradePathEndsOnAWorkingSource() {
+        let name = "tms.mig.reported"
+        let defaults = freshDefaults(name)
+
+        // 1.0.0: pressed "Set up later".
+        defaults.set(true, forKey: "hasCompletedOnboarding")
+        // A later 1.0.0 launch migrated them onto the Web API.
+        defaults.set("spotifyWebAPI", forKey: "sourceKind")
+        // The user cleared only the onboarding flag, as advised.
+        defaults.removeObject(forKey: "hasCompletedOnboarding")
+
+        // 1.0.1 launches: setup reappears *and* the source is usable.
+        let settings = AppSettings(defaults: defaults)
+        XCTAssertFalse(settings.hasCompletedOnboarding, "setup must reappear")
+        XCTAssertEqual(AppSettings.resolveSourceKind(defaults, hasWebAPICredentials: { false }),
+                       .spotifyLocal,
+                       "and must land on the source that can actually ask for Automation")
+    }
+}
+
+/// Launch must not touch the Keychain.
+///
+/// `AppSettings.init` runs inside SwiftUI's `@StateObject` construction, on the main
+/// thread, during launch. `SecItemCopyMatching` can block indefinitely on securityd — for
+/// instance when the item was written by a different code identity and macOS wants to
+/// prompt — and a menu-bar app has no window to host that prompt, so it hangs with no UI
+/// and no logs. `SpotifyAuth.init` avoids this deliberately; the credential-keyed source
+/// migration briefly reintroduced it by reading credentials from `init`.
+@MainActor
+final class LaunchPathKeychainTests: XCTestCase {
+
+    private func freshDefaults(_ name: String) -> UserDefaults {
+        let defaults = UserDefaults(suiteName: name)!
+        defaults.removePersistentDomain(forName: name)
+        return defaults
+    }
+
+    /// Constructing settings must resolve entirely from preferences.
+    func testStartupSourceResolutionReadsOnlyPreferences() {
+        let defaults = freshDefaults("tms.launch.nokeychain")
+        defaults.set("spotifyWebAPI", forKey: "sourceKind")
+
+        // No credential closure is available to this call at all — if the launch path
+        // needed one, this could not compile, let alone answer.
+        XCTAssertEqual(AppSettings.storedSourceKind(defaults), .spotifyWebAPI)
+        XCTAssertEqual(AppSettings(defaults: defaults).sourceKind, .spotifyWebAPI,
+                       "launch takes the stored value as-is; repair happens later")
+    }
+
+    func testAFreshProfileStartsOnLocalWithoutConsultingCredentials() {
+        XCTAssertEqual(AppSettings.storedSourceKind(freshDefaults("tms.launch.fresh")),
+                       .spotifyLocal)
+    }
+
+    /// The repair still happens — just after launch, with the answer passed in.
+    func testTheRepairRunsLaterAndCorrectsAStrandedInstall() {
+        let defaults = freshDefaults("tms.launch.repair")
+        defaults.set("spotifyWebAPI", forKey: "sourceKind")
+        let settings = AppSettings(defaults: defaults)
+        XCTAssertEqual(settings.sourceKind, .spotifyWebAPI, "unchanged at launch")
+
+        settings.repairSourceKind(hasWebAPICredentials: false)
+        XCTAssertEqual(settings.sourceKind, .spotifyLocal, "corrected once credentials are known")
+        XCTAssertEqual(defaults.string(forKey: "sourceKind"), "spotifyLocal")
+    }
+
+    /// And the repair must not masquerade as the user choosing a source, or the next
+    /// repair would refuse to run and the user could never be corrected again.
+    func testARepairIsNotRecordedAsAnExplicitChoice() {
+        let defaults = freshDefaults("tms.launch.notchoice")
+        defaults.set("spotifyWebAPI", forKey: "sourceKind")
+        let settings = AppSettings(defaults: defaults)
+        settings.repairSourceKind(hasWebAPICredentials: false)
+
+        XCTAssertFalse(defaults.bool(forKey: "sourceChosenExplicitly"),
+                       "the app correcting itself is not a decision the user made")
+    }
+
+    /// A real choice still registers.
+    func testAUserChoiceIsRecordedAsOne() {
+        let defaults = freshDefaults("tms.launch.choice")
+        let settings = AppSettings(defaults: defaults)
+        settings.sourceKind = .spotifyWebAPI
+        XCTAssertTrue(defaults.bool(forKey: "sourceChosenExplicitly"))
+
+        // And is then immune to repair.
+        settings.repairSourceKind(hasWebAPICredentials: false)
+        XCTAssertEqual(settings.sourceKind, .spotifyWebAPI)
+    }
+}
+
+/// The startup repair must not depend on a window being opened.
+///
+/// `performStartupChecks()` was reachable only from the menu-bar panel's `.task`, which
+/// runs when that panel is rendered — i.e. when the user clicks the icon. A first-run user
+/// is looking at the setup window and may never click it, so on precisely the installs
+/// that needed repairing, neither the source repair nor the selector self-test ran.
+@MainActor
+final class StartupRepairReachabilityTests: XCTestCase {
+
+    private func freshDefaults(_ name: String) -> UserDefaults {
+        let defaults = UserDefaults(suiteName: name)!
+        defaults.removePersistentDomain(forName: name)
+        return defaults
+    }
+
+    /// A stranded profile must be corrected by the repair alone, with no UI involved.
+    func testAStrandedProfileIsRepairedWithoutOpeningAnyWindow() {
+        let defaults = freshDefaults("tms.startup.stranded")
+        defaults.set("spotifyWebAPI", forKey: "sourceKind")
+        let settings = AppSettings(defaults: defaults)
+
+        settings.repairSourceKind(hasWebAPICredentials: false)
+
+        XCTAssertEqual(settings.sourceKind, .spotifyLocal)
+        XCTAssertEqual(defaults.string(forKey: "sourceKind"), "spotifyLocal",
+                       "and it persists, so the next launch starts correct")
+    }
+
+    /// Running it twice must be harmless — launch drives it, and the panel still may too.
+    func testRepairIsIdempotent() {
+        let defaults = freshDefaults("tms.startup.idempotent")
+        defaults.set("spotifyWebAPI", forKey: "sourceKind")
+        let settings = AppSettings(defaults: defaults)
+
+        for _ in 0..<3 { settings.repairSourceKind(hasWebAPICredentials: false) }
+        XCTAssertEqual(settings.sourceKind, .spotifyLocal)
+        XCTAssertFalse(defaults.bool(forKey: "sourceChosenExplicitly"),
+                       "repeated repairs must never accumulate into a fake user choice")
+    }
+
+    /// Once repaired, a later run with credentials present must not bounce them back —
+    /// the stored local value is now the truth, and only the user may change it.
+    func testARepairedProfileIsNotBouncedBackLater() {
+        let defaults = freshDefaults("tms.startup.stable")
+        defaults.set("spotifyWebAPI", forKey: "sourceKind")
+        let settings = AppSettings(defaults: defaults)
+        settings.repairSourceKind(hasWebAPICredentials: false)
+        XCTAssertEqual(settings.sourceKind, .spotifyLocal)
+
+        // The user later connects the Web API from Settings; that is an explicit choice.
+        settings.sourceKind = .spotifyWebAPI
+        settings.repairSourceKind(hasWebAPICredentials: true)
+        XCTAssertEqual(settings.sourceKind, .spotifyWebAPI)
+    }
+}

@@ -95,9 +95,35 @@ public final class AppEnvironment: ObservableObject {
     /// Keychain has been read, which deliberately happens after launch (see SpotifyAuth).
     @Published public private(set) var spotifyConnected = false
 
-    /// Run the on-upgrade checks. Called from the UI's `.task`, so it is already off the
-    /// launch critical path. Credential loading happens in `init` instead — see there.
+    private var hasRunStartupChecks = false
+
+    /// Run the on-upgrade checks. Off the launch critical path, but not dependent on any
+    /// window being opened.
+    ///
+    /// This used to be reachable only from `MenuBarContentView`'s `.task`, which runs when
+    /// the menu-bar panel is *rendered* — that is, when the user clicks the icon. A
+    /// first-run user is looking at the setup window and may never open the panel, so on
+    /// exactly the installs that need repairing most, neither the source repair nor the
+    /// selector self-test ran at all. The app delegate now also drives this at launch.
+    ///
+    /// Idempotent: both callers are expected, and the second is a no-op.
     public func performStartupChecks() async {
+        guard !hasRunStartupChecks else { return }
+        hasRunStartupChecks = true
+        await runStartupChecks()
+    }
+
+    private func runStartupChecks() async {
+        // The source repair needs to know whether Web API credentials exist, which means
+        // reading the Keychain — off the main thread, and only here. Doing it during
+        // `AppSettings.init` would put a synchronous `SecItemCopyMatching` on the launch
+        // path, which is the hang `SpotifyAuth.init` documents: securityd can block
+        // indefinitely, and a menu-bar app has no window to host the prompt.
+        let hasCredentials = await Task.detached(priority: .utility) {
+            SpotifyAuth.hasStoredCredentials()
+        }.value
+        settings.repairSourceKind(hasWebAPICredentials: hasCredentials)
+
         refreshSpotifyConnection()
         await coordinator.runSelfTestIfNeeded()
     }

@@ -22,9 +22,18 @@ final class OnboardingModel: ObservableObject {
         var isReady: Bool { if case .ready = self { return true }; return false }
     }
 
+    /// An action the user can take to get themselves unstuck, when the failure is one
+    /// macOS will not re-prompt for on its own.
+    enum RecoveryAction: Equatable {
+        case openAutomationSettings
+    }
+
     @Published private(set) var hasAccessibility = false
     @Published private(set) var teamsRunning = false
     @Published private(set) var sourceCheck: SourceCheck = .notChecked
+    /// Non-nil when `sourceCheck` is a failure the user can act on. Kept separate from
+    /// `SourceCheck.failed` so the view can stay a plain string render.
+    @Published private(set) var recoveryAction: RecoveryAction?
     @Published var isConnecting = false
     @Published var connectError: String?
 
@@ -114,27 +123,62 @@ final class OnboardingModel: ObservableObject {
 
     /// Prove the source works by reading from it.
     ///
-    /// For the local source this is also what triggers the macOS Automation prompt — at
-    /// the moment the user asked for it, rather than silently in a background poll where
-    /// the reason for the prompt would be a mystery.
+    /// Onboarding is Local-only by design (see `OnboardingView.sourceStep`), so this
+    /// *makes* the local source the active one rather than assuming it already is. That
+    /// assumption was the v1.0.0 first-run blocker. `AppSettings.resolveSourceKind` then
+    /// keyed on `hasCompletedOnboarding`, so every profile that had ever finished setup —
+    /// i.e. every machine upgrading from v1.0.0 — resolved to `.spotifyWebAPI` and had it
+    /// written down permanently. Step 2 silently verified the **Web API** source: no Apple
+    /// Event was ever sent, macOS had nothing to prompt for, and the Web API's
+    /// `.notAuthorized` description — "Spotify is not connected." — was shown to a user who
+    /// had never been asked for anything. That resolution now keys on real credentials
+    /// instead; pinning here closes the same hole from the onboarding side.
     ///
-    /// The failure messages are deliberately about what the person can *do*. "no active
-    /// playback" and an Apple Event code are both accurate and both useless to someone who
-    /// just wants their status to work.
+    /// The order below matters. Consent is classified first so a never-asked user can be
+    /// prompted deliberately, and the read is still attempted in every case: inspecting
+    /// TCC alone would leave a fresh user waiting for a permission that nothing had asked
+    /// for.
     func verifySource() async {
         sourceCheck = .checking
+        recoveryAction = nil
 
-        if settings.sourceKind == .spotifyLocal {
-            guard isSpotifyInstalled else {
-                sourceCheck = .failed("Spotify isn't installed on this Mac. Install the Spotify "
-                                    + "desktop app from spotify.com, then check again.")
-                return
-            }
-            guard isSpotifyRunning else {
-                sourceCheck = .failed("Spotify isn't running. Open Spotify and play something, "
-                                    + "then check again.")
-                return
-            }
+        // Make sure the profile has a source that can actually reach Spotify, using the
+        // repair that owns this decision rather than writing `sourceKind` here.
+        //
+        // Two reasons it must be the repair and not a direct write. A direct assignment
+        // fires `sourceKind`'s `didSet`, which records `sourceChosenExplicitly` — falsely
+        // marking a choice the user never made, and permanently disabling the repair for
+        // that profile. And the repair alone honours an explicit Web API choice, so
+        // someone who picked it in Settings and has not connected yet is left alone
+        // instead of being dragged onto the local source every time setup opens.
+        //
+        // Done here as well as in `AppEnvironment.performStartupChecks()`, which now runs
+        // at launch rather than from the menu-bar panel appearing. Repeating it is free —
+        // the repair is idempotent and no-ops when the source is already correct — and it
+        // keeps this step correct on its own rather than dependent on launch ordering.
+        //
+        // The Keychain read is on a detached task: a synchronous SecItemCopyMatching on
+        // the main thread is the securityd hang `SpotifyAuth.init` documents.
+        let hasCredentials = await Task.detached(priority: .utility) {
+            SpotifyAuth.hasStoredCredentials()
+        }.value
+        settings.repairSourceKind(hasWebAPICredentials: hasCredentials)
+
+        guard isSpotifyInstalled else {
+            sourceCheck = .failed("Spotify isn't installed on this Mac. Install the Spotify "
+                                + "desktop app from spotify.com, then check again.")
+            return
+        }
+        guard isSpotifyRunning else {
+            sourceCheck = .failed("Open Spotify, then try again.")
+            return
+        }
+
+        // Ask macOS for consent *before* reading when it has never been asked. A menu-bar
+        // app cannot rely on NSAppleScript to raise the dialog — when it cannot, it just
+        // returns -1743, which is indistinguishable from a refusal.
+        if await automationPermission(promptIfNeeded: false) == .notDetermined {
+            _ = await automationPermission(promptIfNeeded: true)
         }
 
         do {
@@ -142,22 +186,46 @@ final class OnboardingModel: ObservableObject {
             let rendered = presence.map {
                 settings.template.render($0, maskProfanity: settings.maskProfanity)
             }
-            if presence == nil && settings.sourceKind == .spotifyLocal {
+            if presence == nil {
                 sourceCheck = .failed("Spotify is open but nothing is playing. Start a track, "
                                     + "then check again.")
                 return
             }
             sourceCheck = .ready(nowPlaying: presence?.isPlaying == true ? rendered : nil)
         } catch PresenceSourceError.automationPermissionDenied {
-            sourceCheck = .failed("macOS is blocking access to Spotify. Open System Settings ▸ "
-                                + "Privacy & Security ▸ Automation, switch on Spotify under "
-                                + "Teams Music Status, then check again.")
+            // -1743 means "not permitted" and nothing more. Only this second, non-prompting
+            // classification separates a user who pressed Don't Allow from one macOS never
+            // got round to asking.
+            switch await automationPermission(promptIfNeeded: false) {
+            case .denied:
+                sourceCheck = .failed("Spotify access is blocked. Enable Teams Music Status "
+                                    + "under System Settings ▸ Privacy & Security ▸ Automation.")
+                recoveryAction = .openAutomationSettings
+            case .notDetermined:
+                sourceCheck = .failed("Spotify access is required. Choose Check Spotify and "
+                                    + "allow access when macOS asks.")
+            case .granted:
+                // The read was refused but consent is in place: a race with Spotify
+                // quitting, or a transient refusal. Sending this user to System Settings
+                // would have them hunt for a switch that is already on.
+                sourceCheck = .failed("Couldn't read Spotify yet. Try again.")
+            case .targetNotRunning:
+                sourceCheck = .failed("Open Spotify, then try again.")
+            case .unknown(let status):
+                // -1743 did happen, so treat an unrecognised follow-up as blocked rather
+                // than as noise — the recovery route is harmless if it turns out not to be.
+                Log.spotify.error("automation consent unclassified: \(status, privacy: .public)")
+                sourceCheck = .failed("Spotify access is blocked. Enable Teams Music Status "
+                                    + "under System Settings ▸ Privacy & Security ▸ Automation.")
+                recoveryAction = .openAutomationSettings
+            }
         } catch PresenceSourceError.appNotRunning {
-            sourceCheck = .failed("Spotify isn't running. Open Spotify and play something, "
-                                + "then check again.")
+            sourceCheck = .failed("Open Spotify, then try again.")
         } catch PresenceSourceError.timedOut {
-            sourceCheck = .failed("Spotify didn't answer in time. This is usually temporary — "
-                                + "check again in a moment.")
+            sourceCheck = .failed("Couldn't read Spotify yet. Try again.")
+        } catch PresenceSourceError.appleEventFailure(let code, _) {
+            Log.spotify.error("onboarding source check failed, Apple Event \(code, privacy: .public)")
+            sourceCheck = .failed("Couldn't read Spotify yet. Try again.")
         } catch let error as PresenceSourceError {
             sourceCheck = .failed(error.localizedDescription)
         } catch {
@@ -165,9 +233,25 @@ final class OnboardingModel: ObservableObject {
         }
     }
 
+    /// Off the main thread: with `promptIfNeeded` this blocks until the user answers.
+    private func automationPermission(promptIfNeeded: Bool) async -> AutomationPermission {
+        await Task.detached(priority: .userInitiated) {
+            SpotifyAutomation.permission(promptIfNeeded: promptIfNeeded)
+        }.value
+    }
+
+    /// The way out of a denied state, which macOS will not re-prompt for.
+    func performRecovery() {
+        switch recoveryAction {
+        case .openAutomationSettings: SpotifyAutomation.openAutomationSettings()
+        case nil: break
+        }
+    }
+
     func sourceChanged() {
         sourceCheck = .notChecked
         connectError = nil
+        recoveryAction = nil
     }
 
     // MARK: Step 3 — Teams

@@ -182,6 +182,13 @@ struct OnboardingView: View {
             }
         case .failed(let message):
             calloutRow(icon: "exclamationmark.triangle", tint: .orange, text: message)
+            // Only shown when macOS will not ask again on its own. Without it a user who
+            // pressed Don't Allow has no route back from inside the app.
+            if model.recoveryAction == .openAutomationSettings {
+                Button("Open Automation Settings") { model.performRecovery() }
+                    .buttonStyle(.bordered)
+                    .accessibilityHint("Opens System Settings, Privacy and Security, Automation")
+            }
         case .notChecked, .checking:
             EmptyView()
         }
