@@ -17,7 +17,7 @@ A small menu-bar utility. No Dock icon, no window unless you ask for one.
 
 Teams Music Status, developed by Zander Dent.
 
-> **Status:** v1.0.0. macOS 14+. Signed with a Developer ID certificate and notarized by
+> **Status:** v1.0.1. macOS 14+. Signed with a Developer ID certificate and notarized by
 > Apple, so it installs and opens normally. See [Known limitations](#known-limitations).
 
 ![A Teams profile card showing the status message "♪ House Music Till'Death by DJ Windows 7"](docs/images/status-in-teams.webp)
