@@ -41,6 +41,12 @@ public final class PresenceCoordinator: ObservableObject {
     private var teamsObservers: [NSObjectProtocol] = []
     private var knownTeamsPID: pid_t?
     private var consecutiveFailures = 0
+    /// Consecutive `elementNotFound` results. Reset by any successful read or write.
+    private var consecutiveSelectorFailures = 0
+    /// How many in a row before automatic updates are paused. Enough that a stale flyout
+    /// or a momentarily wedged tree recovers first, few enough that a genuine Teams UI
+    /// change is caught within seconds.
+    static let selectorFailuresBeforeDisabling = 4
     /// Guards against the menu-bar panel's `.task` starting a second self-test each time
     /// it re-appears.
     private var isSelfTesting = false
@@ -317,6 +323,7 @@ public final class PresenceCoordinator: ObservableObject {
                 restoreStore.save(from: engineState)
                 lastWarnings = target.lastWarnings
                 consecutiveFailures = 0
+                consecutiveSelectorFailures = 0
                 state = .ready
                 Log.coordinator.info("Teams status updated: \(Redact.status(status), privacy: .public)")
             } catch {
@@ -409,10 +416,28 @@ public final class PresenceCoordinator: ObservableObject {
             // count as a consecutive failure: this is an expected state, not a fault.
             state = .teamsSignedOut
         case PresenceTargetError.elementNotFound(let selector, _):
-            // A missing selector after a Teams update is not a transient glitch; stop
-            // automating and tell the user rather than thrashing against a changed UI.
-            state = .teamsSelectorsChanged("Could not find '\(selector)'.")
-            isEnabled = false
+            // A missing selector usually means Teams changed its UI, and thrashing against
+            // that helps nobody — but it is not always what happened, and this used to
+            // switch syncing off permanently on the very first occurrence.
+            //
+            // A flyout left open by a crash or a force quit collapses Teams' exposed tree
+            // to that dialog, so the profile button genuinely cannot be found for a moment.
+            // That is transient and self-healing, and disabling on it left people with
+            // "automatic updates are not turned on" and no idea why. Reported exactly that
+            // way after an interrupted write.
+            //
+            // So it now takes a few consecutive failures. A real UI change fails every
+            // time and still gets caught within seconds; a stale flyout resolves on the
+            // next tick and never reaches the threshold.
+            consecutiveSelectorFailures += 1
+            if consecutiveSelectorFailures >= Self.selectorFailuresBeforeDisabling {
+                Log.coordinator.error("selector '\(selector, privacy: .public)' missing \(self.consecutiveSelectorFailures, privacy: .public) times in a row; pausing automatic updates")
+                state = .teamsSelectorsChanged("Could not find '\(selector)'.")
+                isEnabled = false
+            } else {
+                Log.coordinator.warning("selector '\(selector, privacy: .public)' not found (\(self.consecutiveSelectorFailures, privacy: .public) in a row); retrying")
+                state = .recovering
+            }
         default:
             consecutiveFailures += 1
             state = consecutiveFailures >= 3

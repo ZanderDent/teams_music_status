@@ -164,7 +164,6 @@ case "spotify":
     // active playback" hid the difference between Spotify being stopped, not running, and
     // an Apple Event that failed -- the exact conflation this source was fixed to remove.
     if useLocal {
-        let tStart = Date()
         let localSem = DispatchSemaphore(value: 0)
         var reading: Result<LocalPlaybackReading, Error>?
         Task {
@@ -184,9 +183,6 @@ case "spotify":
         while reading == nil {
             if Date() >= deadline { waited = .timedOut; break }
             RunLoop.current.run(mode: .default, before: Date().addingTimeInterval(0.02))
-        }
-        if ProcessInfo.processInfo.environment["TMS_TIMING"] == "1" {
-            FileHandle.standardError.write("  bridge total: \(Int(Date().timeIntervalSince(tStart) * 1000))ms\n".data(using: .utf8)!)
         }
         if waited == .timedOut {
             print("✗ timed out after 20s reading the local Spotify app"); exit(1)

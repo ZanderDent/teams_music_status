@@ -160,3 +160,23 @@ final class SignedOutTests: XCTestCase {
                        "signing back into Teams is not an action the app should demand")
     }
 }
+
+/// A transient missing selector must not permanently switch syncing off.
+final class SelectorFailureToleranceTests: XCTestCase {
+
+    /// Reported as "it says manual mode and automatic updates are not turned on". A flyout
+    /// left open by a crash collapses Teams' exposed tree, so the profile button cannot be
+    /// found for a moment — and the first occurrence used to disable automatic updates
+    /// outright, with no route back except noticing and re-enabling by hand.
+    func testDisablingRequiresRepeatedFailures() {
+        XCTAssertGreaterThan(PresenceCoordinator.selectorFailuresBeforeDisabling, 1,
+                             "one transient failure must never disable syncing")
+    }
+
+    /// A real Teams UI change fails every attempt, so the threshold has to be low enough
+    /// that it is still caught within a few poll intervals rather than thrashing for
+    /// minutes against a UI that will never match.
+    func testThresholdIsStillPromptForARealUIChange() {
+        XCTAssertLessThanOrEqual(PresenceCoordinator.selectorFailuresBeforeDisabling, 6)
+    }
+}
