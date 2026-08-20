@@ -58,6 +58,73 @@ int32_t tw_now_playing(TWNowPlaying *out);
  */
 int32_t tw_now_playing_for(const uint16_t *appIdNeedle, TWNowPlaying *out);
 
+/* --- the Teams accessibility tree ---------------------------------------- */
+
+#define TW_NAME_MAX  512
+#define TW_ID_MAX    160
+
+/*
+ * One element, flattened. Snapshotting into plain structs rather than handing Swift live
+ * COM pointers is deliberate: every UI Automation property read is a cross-process call,
+ * and matching a dozen selectors against a live tree costs a round trip per property per
+ * node. One cached bulk read is the difference between ~600ms and ~30ms.
+ */
+typedef struct {
+    int32_t  controlType;     /* UIA control type id, e.g. 50000 = Button */
+    int32_t  isDialog;        /* Window control types that model a Teams flyout */
+    uint16_t name[TW_NAME_MAX];
+    uint16_t automationId[TW_ID_MAX];
+    uint16_t value[TW_NAME_MAX];
+    uint16_t helpText[TW_ID_MAX];
+} TWNode;
+
+/*
+ * Acquires the Teams window and switches Chromium's web-content accessibility on.
+ *
+ * Chromium keeps the renderer tree off until it believes an assistive technology is
+ * present. Obtaining an IAccessible for the render widget is not enough on its own — the
+ * tree only materialises once it is *read through*, which is the same thing the macOS
+ * implementation discovered about walking the WebView helper processes.
+ *
+ * Safe to call repeatedly; the tree can lapse and this re-establishes it.
+ */
+int32_t tw_open(void);
+void    tw_close(void);
+
+/* Fills `out` with up to `capacity` elements. Only control types selectors can match are
+ * returned, which keeps a ~4300-node Teams tree down to a few hundred rows. */
+int32_t tw_snapshot(TWNode *out, int32_t capacity, int32_t *count);
+
+/*
+ * Presses the element whose accessible name begins with `namePrefix`, via MSAA.
+ *
+ * MSAA specifically, and not UI Automation. Measured against live Teams: UIA's SetFocus
+ * and ExpandCollapsePattern.Expand both work but pull the Teams window to the foreground,
+ * and UIA's LegacyIAccessible DoDefaultAction does not steal focus but silently does
+ * nothing. Navigating MSAA directly and calling accDoDefaultAction is the only route that
+ * both works and leaves the foreground window alone.
+ *
+ * Returning TW_OK means the call was delivered, never that anything happened. Chromium
+ * routinely accepts an action and does nothing; the caller must observe the expected state
+ * change itself.
+ */
+int32_t tw_msaa_press(const uint16_t *namePrefix);
+
+/*
+ * Posts a key to the renderer without activating Teams — the counterpart of the macOS
+ * CGEvent.postToPid path.
+ *
+ * Two details are load-bearing. The message must go to the Chrome_WidgetWin_1 browser
+ * widget, not the Chrome_RenderWidgetHostHWND that carries accessibility; and lParam must
+ * carry the real scan code, because Chromium reads it and silently discards a key posted
+ * with a zero lParam.
+ */
+int32_t tw_post_key(int32_t virtualKey);
+
+#define TW_VK_ESCAPE 0x1B
+#define TW_VK_RETURN 0x0D
+#define TW_VK_SPACE  0x20
+
 #ifdef __cplusplus
 } /* extern "C" */
 #endif
