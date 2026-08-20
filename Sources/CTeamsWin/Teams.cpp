@@ -225,6 +225,25 @@ int32_t cached_int(IUIAutomationElement *e, PROPERTYID id)
     return out;
 }
 
+// --- key delivery --------------------------------------------------------
+
+// Two details are load-bearing. The message goes to the Chrome_WidgetWin_1 browser widget,
+// not to the Chrome_RenderWidgetHostHWND that carries accessibility. And lParam must hold
+// the real scan code: Chromium reads it, and silently discards a key posted with a zero
+// lParam -- which looks exactly like the key having been ignored.
+void send_key(int virtualKey)
+{
+    auto &s = state();
+    const UINT scan = MapVirtualKeyW(static_cast<UINT>(virtualKey), MAPVK_VK_TO_VSC);
+    const LPARAM down = static_cast<LPARAM>(1 | (scan << 16));
+    const LPARAM up = static_cast<LPARAM>(1 | (scan << 16) | 0xC0000000);
+
+    for (HWND h : s.windows.inputTargets) {
+        PostMessageW(h, WM_KEYDOWN, static_cast<WPARAM>(virtualKey), down);
+        PostMessageW(h, WM_KEYUP, static_cast<WPARAM>(virtualKey), up);
+    }
+}
+
 } // namespace
 
 // --- public surface ------------------------------------------------------
@@ -362,18 +381,73 @@ extern "C" int32_t tw_msaa_press(const uint16_t *namePrefix)
     return TW_ERR_NOT_FOUND;
 }
 
-extern "C" int32_t tw_post_key(int32_t virtualKey)
+extern "C" int32_t tw_set_value(const uint16_t *automationId, const uint16_t *text)
 {
+    if (automationId == nullptr || text == nullptr) return TW_ERR_COM;
+    auto &s = state();
+    if (!s.uia || s.windows.top == nullptr) return TW_ERR_TREE_UNAVAIL;
+
+    winrt::com_ptr<IUIAutomationElement> root;
+    if (FAILED(s.uia->ElementFromHandle(s.windows.top, root.put())) || !root)
+        return TW_ERR_NO_TEAMS;
+
+    VARIANT idValue;
+    VariantInit(&idValue);
+    idValue.vt = VT_BSTR;
+    idValue.bstrVal = SysAllocString(reinterpret_cast<const wchar_t *>(automationId));
+
+    winrt::com_ptr<IUIAutomationCondition> condition;
+    HRESULT hr = s.uia->CreatePropertyCondition(UIA_AutomationIdPropertyId, idValue, condition.put());
+    VariantClear(&idValue);
+    if (FAILED(hr) || !condition) return TW_ERR_COM;
+
+    winrt::com_ptr<IUIAutomationElement> element;
+    if (FAILED(root->FindFirst(TreeScope_Descendants, condition.get(), element.put())) || !element)
+        return TW_ERR_NOT_FOUND;
+
+    winrt::com_ptr<IUIAutomationValuePattern> value;
+    if (FAILED(element->GetCurrentPatternAs(UIA_ValuePatternId, IID_PPV_ARGS(value.put()))) || !value)
+        return TW_ERR_NOT_FOUND;
+
+    BSTR payload = SysAllocString(reinterpret_cast<const wchar_t *>(text));
+    hr = value->SetValue(payload);
+    SysFreeString(payload);
+
+    // Delivered, not confirmed: Chromium accepts SetValue on a contenteditable and may
+    // leave the editor's own model untouched. The caller reads the value back.
+    return SUCCEEDED(hr) ? TW_OK : TW_ERR_COM;
+}
+
+extern "C" int32_t tw_type_text(const uint16_t *text)
+{
+    if (text == nullptr) return TW_ERR_COM;
     auto &s = state();
     if (s.windows.inputTargets.empty()) return TW_ERR_NO_TEAMS;
 
-    const UINT scan = MapVirtualKeyW(static_cast<UINT>(virtualKey), MAPVK_VK_TO_VSC);
-    const LPARAM down = static_cast<LPARAM>(1 | (scan << 16));
-    const LPARAM up = static_cast<LPARAM>(1 | (scan << 16) | 0xC0000000);
-
-    for (HWND h : s.windows.inputTargets) {
-        PostMessageW(h, WM_KEYDOWN, static_cast<WPARAM>(virtualKey), down);
-        PostMessageW(h, WM_KEYUP, static_cast<WPARAM>(virtualKey), up);
+    for (const uint16_t *p = text; *p != 0; ++p) {
+        for (HWND h : s.windows.inputTargets)
+            PostMessageW(h, WM_CHAR, static_cast<WPARAM>(*p), 1);
     }
+    return TW_OK;
+}
+
+extern "C" int32_t tw_clear_field(int32_t count)
+{
+    auto &s = state();
+    if (s.windows.inputTargets.empty()) return TW_ERR_NO_TEAMS;
+    if (count < 0) return TW_ERR_COM;
+
+    // A posted Ctrl+A does not select: Chromium reads modifier state from the receiving
+    // thread's keyboard, which PostMessage does not touch, so the "a" arrives as a literal
+    // character and corrupts the field. Backspace carries no modifier and does work.
+    send_key(VK_END);
+    for (int32_t i = 0; i < count; ++i) send_key(VK_BACK);
+    return TW_OK;
+}
+
+extern "C" int32_t tw_post_key(int32_t virtualKey)
+{
+    if (state().windows.inputTargets.empty()) return TW_ERR_NO_TEAMS;
+    send_key(virtualKey);
     return TW_OK;
 }

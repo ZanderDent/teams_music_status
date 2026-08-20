@@ -121,9 +121,45 @@ int32_t tw_msaa_press(const uint16_t *namePrefix);
  */
 int32_t tw_post_key(int32_t virtualKey);
 
+/*
+ * Sets the text of the element with `automationId` via UI Automation's ValuePattern.
+ *
+ * The status compose box is a CKEditor contenteditable rather than a plain text control,
+ * so this is not guaranteed to take, and it may set the DOM text without notifying the
+ * editor's own model. Verify by reading the value back before trusting it, and fall back
+ * to tw_type_text when it does not stick.
+ */
+int32_t tw_set_value(const uint16_t *automationId, const uint16_t *text);
+
+/*
+ * Types `text` into whatever currently holds the caret, one WM_CHAR per UTF-16 unit,
+ * posted to the browser widget so Teams is never activated.
+ *
+ * Requires the caret to already be in the intended field: there is no way to move DOM
+ * focus on Windows without activating the window, so this is only usable at a point where
+ * Teams has focused the field itself — which it does when the status editor opens.
+ */
+int32_t tw_type_text(const uint16_t *text);
+
+/*
+ * Empties the focused field by moving the caret to the end and pressing Backspace
+ * `count` times.
+ *
+ * Blunt, and deliberately so. Ctrl+A cannot be delivered this way: Chromium derives
+ * modifier state from the receiving thread's keyboard, which a posted WM_KEYDOWN for
+ * VK_CONTROL does not change, so a posted Ctrl+A arrives as a plain "a" and *inserts* a
+ * character instead of selecting anything. Backspace needs no modifier, so it works.
+ *
+ * `count` should be the field's current length plus a little slack; the caller verifies
+ * the field is actually empty afterwards rather than assuming.
+ */
+int32_t tw_clear_field(int32_t count);
+
 #define TW_VK_ESCAPE 0x1B
 #define TW_VK_RETURN 0x0D
 #define TW_VK_SPACE  0x20
+#define TW_VK_DELETE 0x2E
+#define TW_VK_BACK   0x08
 
 #ifdef __cplusplus
 } /* extern "C" */

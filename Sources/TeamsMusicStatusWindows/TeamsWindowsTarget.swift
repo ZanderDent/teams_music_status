@@ -108,11 +108,85 @@ public final class TeamsWindowsTarget: PresenceTarget, @unchecked Sendable {
     // MARK: - Writing
 
     public func apply(status: String) throws {
-        throw PresenceTargetError.notReady(.needsRecovery("Writing is not implemented yet on Windows."))
+        try TeamsUI.exclusive {
+            try ensureOpen()
+            defer { _ = try? closeOurSurfaces() }
+
+            try openFlyout()
+            try openEditor()
+            try replaceComposeText(with: status)
+
+            let snapshot = try UIASnapshot.capture()
+            guard let done = snapshot.first(TeamsSelectors.doneButton),
+                  let name = done.title ?? done.axDescription else {
+                throw PresenceTargetError.elementNotFound(
+                    selector: TeamsSelectors.doneButton.name, stage: "committing the status")
+            }
+            try press(named: name, control: TeamsSelectors.doneButton.name)
+
+            // Verified against Teams' own readout, not against the compose box we typed
+            // into. Anything less would report success for a status the editor accepted
+            // and then discarded.
+            let committed = waitForSnapshot { snap in
+                guard let readout = snap.first(TeamsSelectors.statusReadout) else { return false }
+                return Self.statusText(from: readout) == status
+            }
+            guard committed != nil else {
+                let actual = (try? UIASnapshot.capture())
+                    .flatMap { $0.first(TeamsSelectors.statusReadout) }
+                    .flatMap { Self.statusText(from: $0) }
+                throw PresenceTargetError.verificationFailed(expected: status, actual: actual ?? "")
+            }
+        }
     }
 
     public func clearStatus() throws {
-        throw PresenceTargetError.notReady(.needsRecovery("Clearing is not implemented yet on Windows."))
+        try TeamsUI.exclusive {
+            try ensureOpen()
+            defer { _ = try? closeOurSurfaces() }
+
+            let snapshot = try openFlyout()
+
+            // Already empty: Teams offers "set status message" instead of the readout.
+            guard let delete = snapshot.first(TeamsSelectors.deleteStatusButton),
+                  let name = delete.axDescription ?? delete.title else {
+                if snapshot.contains(TeamsSelectors.setStatusItem) { return }
+                throw PresenceTargetError.elementNotFound(
+                    selector: TeamsSelectors.deleteStatusButton.name, stage: "clearing the status")
+            }
+            try press(named: name, control: TeamsSelectors.deleteStatusButton.name)
+
+            guard waitForSnapshot(where: { !$0.contains(TeamsSelectors.statusReadout) }) != nil else {
+                throw PresenceTargetError.activationFailed(control: TeamsSelectors.deleteStatusButton.name)
+            }
+        }
+    }
+
+    /// Empties the compose box and types `text`, verifying both halves by reading Teams
+    /// back rather than trusting either operation to have landed.
+    private func replaceComposeText(with text: String) throws {
+        let existing = try composeText() ?? ""
+
+        if !existing.isEmpty {
+            // Slack because the field's character count and the number of backspaces a
+            // contenteditable needs are not always the same thing.
+            _ = tw_clear_field(Int32(existing.count + 8))
+            guard waitForSnapshot(timeout: 3.0, where: {
+                (Self.composeContent(in: $0) ?? "x").isEmpty
+            }) != nil else {
+                throw PresenceTargetError.verificationFailed(
+                    expected: "", actual: (try? composeText()) ?? "<unreadable>")
+            }
+        }
+
+        typeIntoCompose(text)
+
+        guard waitForSnapshot(timeout: 4.0, where: {
+            Self.composeContent(in: $0) == text
+        }) != nil else {
+            throw PresenceTargetError.verificationFailed(
+                expected: text, actual: (try? composeText()) ?? "<unreadable>")
+        }
     }
 
     // MARK: - Diagnostics
@@ -140,6 +214,34 @@ public final class TeamsWindowsTarget: PresenceTarget, @unchecked Sendable {
                 let hit = snapshot.first(selector)
                 return (selector.name, hit != nil, hit?.axDescription ?? hit?.title)
             }
+        }
+    }
+
+    /// Tries each text-entry method against the real compose box and reports what actually
+    /// landed, **without pressing Done** — so nothing reaches the user's account.
+    ///
+    /// Exists because there is no way to know from a return code which method works: the
+    /// compose box is a CKEditor contenteditable, and Chromium will accept a ValuePattern
+    /// write that the editor's own model never sees.
+    public func probeTextEntry(_ text: String) throws -> [(method: String, readBack: String?)] {
+        try TeamsUI.exclusive {
+            try ensureOpen()
+            defer { _ = try? closeOurSurfaces() }
+
+            try openFlyout()
+            try openEditor()
+
+            var results: [(String, String?)] = []
+            results.append(("baseline (before any write)", try composeText()))
+
+            _ = setComposeValue(text)
+            Thread.sleep(forTimeInterval: 0.6)
+            results.append(("ValuePattern.SetValue", try composeText()))
+
+            try replaceComposeText(with: text)
+            results.append(("clear + WM_CHAR", try composeText()))
+
+            return results
         }
     }
 
@@ -201,6 +303,69 @@ public final class TeamsWindowsTarget: PresenceTarget, @unchecked Sendable {
             snapshot = settled
         }
         return true
+    }
+
+    /// Opens the status editor from an already-open flyout.
+    ///
+    /// Teams shows `editStatusButton` when a status message exists and `setStatusItem`
+    /// when none does, so both are tried.
+    @discardableResult
+    private func openEditor() throws -> UIASnapshot {
+        let snapshot = try UIASnapshot.capture()
+        if snapshot.contains(TeamsSelectors.composeBox) { return snapshot }
+
+        let entry = snapshot.first(TeamsSelectors.editStatusButton)
+            ?? snapshot.first(TeamsSelectors.setStatusItem)
+        guard let entry, let name = entry.axDescription ?? entry.title else {
+            throw PresenceTargetError.elementNotFound(
+                selector: "editStatusButton or setStatusItem", stage: "opening the status editor")
+        }
+
+        try press(named: name, control: TeamsSelectors.editStatusButton.name)
+
+        guard let opened = waitForSnapshot(where: { $0.contains(TeamsSelectors.composeBox) }) else {
+            throw PresenceTargetError.activationFailed(control: TeamsSelectors.editStatusButton.name)
+        }
+        return opened
+    }
+
+    /// What the compose box currently holds, read back from Teams rather than remembered.
+    private func composeText() throws -> String? {
+        Self.composeContent(in: try UIASnapshot.capture())
+    }
+
+    /// The user-visible content of the compose box.
+    ///
+    /// CKEditor renders its placeholder as real text *inside* the contenteditable, so an
+    /// empty box reports "Type @ to mention someone in your status" as its accessible
+    /// value. Taken at face value, an emptied field looks like a full one and clearing can
+    /// never be verified — so a value equal to the placeholder is reported as empty.
+    static func composeContent(of element: UIAElement) -> String {
+        let raw = (element.value ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        let placeholder = (element.placeholder ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        if !placeholder.isEmpty, raw == placeholder { return "" }
+        return raw
+    }
+
+    /// The compose box's content within a snapshot, or nil if the box is not present.
+    private static func composeContent(in snapshot: UIASnapshot) -> String? {
+        guard let box = snapshot.first(TeamsSelectors.composeBox) else { return nil }
+        return composeContent(of: box)
+    }
+
+    private func setComposeValue(_ text: String) -> Bool {
+        var id = Array("status-note-compose".utf16); id.append(0)
+        var payload = Array(text.utf16); payload.append(0)
+        return id.withUnsafeBufferPointer { idBuf in
+            payload.withUnsafeBufferPointer { textBuf in
+                tw_set_value(idBuf.baseAddress, textBuf.baseAddress) == TW_OK
+            }
+        }
+    }
+
+    private func typeIntoCompose(_ text: String) {
+        var payload = Array(text.utf16); payload.append(0)
+        _ = payload.withUnsafeBufferPointer { tw_type_text($0.baseAddress) }
     }
 
     /// Presses a control by its accessible name, through MSAA.

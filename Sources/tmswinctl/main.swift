@@ -15,6 +15,10 @@ func usage() -> Never {
       teams-selectors        resolve every Teams selector and name any that broke
       teams-dump [needle]    list what Teams is exposing right now
       render [template]      render the status text for what is playing now
+      teams-try-text <text>  try text entry without committing (Done is not pressed)
+      teams-set <text>       write and commit a status message
+      teams-clear            remove the status message
+      sync-once [template]   read what is playing, render it, publish it, verify
       version
 
     Default template: \(StatusTemplate.defaultTemplate)
@@ -114,6 +118,72 @@ case "teams-dump":
             guard !row.name.isEmpty || !row.domID.isEmpty else { continue }
             print("  \(row.role.padding(toLength: 14, withPad: " ", startingAt: 0)) \(row.name)\(row.domID.isEmpty ? "" : "  [\(row.domID)]")")
         }
+    } catch {
+        FileHandle.standardError.write(Data("error: \(error.localizedDescription)\n".utf8))
+        exit(1)
+    }
+
+case "teams-try-text":
+    // Exercises text entry against the real compose box and reports what landed. Stops
+    // short of Done, so the user's published status is untouched.
+    let text = arguments.count > 1 ? arguments[1] : "♫ probe — text entry"
+    let target = TeamsWindowsTarget()
+    do {
+        print("attempting: \(text)")
+        for result in try target.probeTextEntry(text) {
+            let landed = result.readBack.map { "'\($0)'" } ?? "<empty>"
+            let match = result.readBack == text ? "  <-- matches" : ""
+            print("  \(result.method.padding(toLength: 28, withPad: " ", startingAt: 0)) \(landed)\(match)")
+        }
+        print("\n(Done was not pressed — the published status is unchanged.)")
+    } catch {
+        FileHandle.standardError.write(Data("error: \(error.localizedDescription)\n".utf8))
+        exit(1)
+    }
+
+case "teams-set":
+    // Writes and commits. Prints the previous status first so it can always be put back.
+    guard arguments.count > 1 else {
+        FileHandle.standardError.write(Data("usage: tmswinctl teams-set <text>\n".utf8))
+        exit(2)
+    }
+    let target = TeamsWindowsTarget()
+    do {
+        let previous = try target.readCurrentStatus()
+        print("previous : \(previous ?? "<none set>")")
+        try target.apply(status: arguments[1])
+        print("wrote    : \(arguments[1])")
+        print("readback : \(try target.readCurrentStatus() ?? "<none set>")")
+    } catch {
+        FileHandle.standardError.write(Data("error: \(error.localizedDescription)\n".utf8))
+        exit(1)
+    }
+
+case "teams-clear":
+    let target = TeamsWindowsTarget()
+    do {
+        print("previous : \(try target.readCurrentStatus() ?? "<none set>")")
+        try target.clearStatus()
+        print("readback : \(try target.readCurrentStatus() ?? "<none set>")")
+    } catch {
+        FileHandle.standardError.write(Data("error: \(error.localizedDescription)\n".utf8))
+        exit(1)
+    }
+
+case "sync-once":
+    // The whole product in one shot: read what is playing, render it, publish it, verify.
+    let template = StatusTemplate(arguments.count > 1 ? arguments[1] : StatusTemplate.defaultTemplate)
+    let target = TeamsWindowsTarget()
+    guard let presence = currentPresence(), presence.isPlaying else {
+        print("nothing is playing — no write")
+        exit(0)
+    }
+    let rendered = template.render(presence)
+    do {
+        print("playing  : \(presence.trackName) — \(presence.joinedArtists)")
+        print("previous : \(try target.readCurrentStatus() ?? "<none set>")")
+        try target.apply(status: rendered)
+        print("published: \(rendered)")
     } catch {
         FileHandle.standardError.write(Data("error: \(error.localizedDescription)\n".utf8))
         exit(1)

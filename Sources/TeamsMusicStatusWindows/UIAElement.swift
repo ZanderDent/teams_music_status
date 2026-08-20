@@ -40,8 +40,14 @@ public struct UIAElement: AccessibleElement, Sendable {
 
         // Chromium exposes a ValuePattern on real inputs but not on static text, where the
         // rendered text is the name instead. `characterCounter` matches on the value of a
-        // static text node reading "22 / 280", so the fallback is load-bearing.
-        let resolved = uiaValue.isEmpty ? name : uiaValue
+        // static text node reading "22 / 280", so that fallback is load-bearing.
+        //
+        // It must *not* apply to edit controls. An edit's name is its accessible label —
+        // for the status compose box, the placeholder "Type @ to mention someone in your
+        // status". Falling back there makes an empty field read as though it still holds
+        // text, so clearing it can never be verified.
+        let isEdit = node.controlType == 50004
+        let resolved = (uiaValue.isEmpty && !isEdit) ? name : uiaValue
         self.value = resolved.isEmpty ? nil : resolved
 
         self.placeholder = help.isEmpty ? nil : help
