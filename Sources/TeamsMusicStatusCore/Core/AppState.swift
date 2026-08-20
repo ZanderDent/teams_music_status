@@ -29,6 +29,21 @@ public enum AppState: Equatable, Sendable {
     case manualOverrideDetected(String?)
     case recovering
 
+    // Recovery is no longer a single indefinite "Reconnecting…". Each of these is a
+    // distinct thing the app is doing or waiting on, because "trying to recover" forever
+    // is indistinguishable from being stuck, and that is exactly how this looked when it
+    // failed in the field.
+    /// Teams was restarted automatically and is being given time to come back.
+    case teamsRestartedAutomatically
+    /// Recovery is deliberately deferred: something is capturing audio, so the user may be
+    /// in a call and Teams must not be touched.
+    case recoveryDeferredForCall
+    /// A recovery action just ran; waiting out its cooldown before trying anything else.
+    case recoveryCoolingDown
+    /// Automated recovery has done everything it can. This is the only state that asks the
+    /// user to act, and it is the last resort rather than the normal path.
+    case recoveryExhausted
+
     /// Short label for the menu-bar header.
     public var title: String {
         switch self {
@@ -50,6 +65,10 @@ public enum AppState: Equatable, Sendable {
         case .teamsSelectorsChanged: return "Teams UI changed"
         case .manualOverrideDetected: return "Manual status detected"
         case .recovering: return "Reconnecting…"
+        case .teamsRestartedAutomatically: return "Restarted Teams"
+        case .recoveryDeferredForCall: return "Waiting until your call ends"
+        case .recoveryCoolingDown: return "Waiting before trying again"
+        case .recoveryExhausted: return "Teams isn't responding"
         }
     }
 
@@ -94,6 +113,16 @@ public enum AppState: Equatable, Sendable {
                 ?? "You changed your Teams status. Automatic updates are paused."
         case .recovering:
             return "Restoring the connection to Teams."
+        case .teamsRestartedAutomatically:
+            return "Teams stopped responding, so it was restarted. Syncing will resume on its own."
+        case .recoveryDeferredForCall:
+            return "Teams needs restarting, but you may be on a call — this will wait until you're done."
+        case .recoveryCoolingDown:
+            return "Waiting a few minutes before trying to reconnect to Teams again."
+        case .recoveryExhausted:
+            // The only recovery state that asks anything of the user, reached only after
+            // the automated escalations have all been tried and capped.
+            return "Teams is not responding to accessibility. Quit and reopen Teams."
         }
     }
 
@@ -103,13 +132,20 @@ public enum AppState: Equatable, Sendable {
     public var severity: Severity {
         switch self {
         case .ready, .syncing: return .active
-        case .disabled, .noPlayback, .recovering: return .idle
+        // Automated recovery is not a fault the user has to care about: the app is
+        // handling it, or deliberately waiting for their call to end.
+        case .disabled, .noPlayback, .recovering,
+             .teamsRestartedAutomatically, .recoveryDeferredForCall, .recoveryCoolingDown:
+            return .idle
         case .spotifyRateLimited, .spotifyUnreachable, .manualOverrideDetected,
              .teamsNotRunning, .teamsAccessibilityTreeUnavailable, .teamsSignedOut, .teamsMinimized:
             return .warning
         case .spotifyDisconnected, .spotifyAuthExpired, .spotifyPermissionMissing,
              .spotifyAutomationDenied,
-             .teamsAccessibilityPermissionMissing, .teamsSelectorsChanged:
+             .teamsAccessibilityPermissionMissing, .teamsSelectorsChanged,
+             // The one recovery state that needs a person. `needsUserAction` keys on
+             // .error, which is exactly right: everything above this has been tried.
+             .recoveryExhausted:
             return .error
         }
     }

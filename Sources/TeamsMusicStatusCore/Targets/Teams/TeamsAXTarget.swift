@@ -96,6 +96,14 @@ public final class TeamsAXTarget: PresenceTarget {
         try TeamsUI.exclusive { try accessibility.ensureHealthy() }
     }
 
+    /// Last-resort window recovery. Takes focus briefly and gives it straight back — see
+    /// `TeamsAccessibility.activateToRestoreWindow`. Gated by the coordinator, never called
+    /// as part of a normal write.
+    @discardableResult
+    public func activateToRestoreWindow() -> Bool {
+        accessibility.activateToRestoreWindow()
+    }
+
     public func handleTeamsRestart() {
         accessibility.handleTeamsRestart()
     }

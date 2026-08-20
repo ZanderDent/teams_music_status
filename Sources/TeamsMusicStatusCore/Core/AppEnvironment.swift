@@ -140,6 +140,27 @@ public final class AppEnvironment: ObservableObject {
         coordinator.refreshSoon()
     }
 
+    /// Change launch-at-login, recording whether it was the user's decision.
+    ///
+    /// `userInitiated: false` is the post-onboarding default and deliberately does NOT set
+    /// the flag, so a later change of default can still reach installs that never chose.
+    public func setLaunchAtLogin(_ enabled: Bool, userInitiated: Bool = true) {
+        if userInitiated { settings.launchAtLoginChosenExplicitly = true }
+        loginItem.setEnabled(enabled)
+    }
+
+    /// Turn launch-at-login on for someone who has never expressed a preference. Called
+    /// when onboarding completes, never afterwards, and never against an explicit choice.
+    public func enableLaunchAtLoginByDefault() {
+        guard !settings.launchAtLoginChosenExplicitly else {
+            Log.app.info("leaving launch at login as the user set it")
+            return
+        }
+        guard loginItem.isSupported, !loginItem.isEnabled else { return }
+        Log.app.info("enabling launch at login by default after setup")
+        loginItem.setEnabled(true)
+    }
+
     public func disconnectSpotify() {
         spotifyAuth.signOut()
         refreshSpotifyConnection()

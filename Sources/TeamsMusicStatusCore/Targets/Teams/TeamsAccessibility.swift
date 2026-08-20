@@ -177,10 +177,17 @@ public final class TeamsAccessibility {
     public func ensureHealthy(timeout: TimeInterval = 90) throws {
         let started = Date()
         var attempts = 0
+        // What we were still stuck on when the clock ran out. Every stuck state used to
+        // surface as `treeUnavailable`, which made a Teams that simply had no window
+        // indistinguishable from a Chromium that had lost its tree — and those need
+        // opposite escalations: one wants a window, the other wants a restart.
+        var lastBlocking: TeamsHealth = .treeUnavailable
 
         while Date().timeIntervalSince(started) < timeout {
             attempts += 1
-            switch health() {
+            let current = health()
+            if current != .healthy { lastBlocking = current }
+            switch current {
             case .healthy:
                 if attempts > 1 {
                     Log.accessibility.info("Teams accessibility recovered after \(attempts, privacy: .public) attempt(s)")
@@ -229,8 +236,18 @@ public final class TeamsAccessibility {
 
         let elapsed = Date().timeIntervalSince(started)
         if health() == .healthy { return }
-        Log.accessibility.error("Teams accessibility could not be established after \(attempts, privacy: .public) attempts")
-        throw TeamsAccessibilityError.treeUnavailable(attempts: attempts, elapsed: elapsed)
+        Log.accessibility.error("Teams accessibility could not be established after \(attempts, privacy: .public) attempts (stuck on \(String(describing: lastBlocking), privacy: .public))")
+        switch lastBlocking {
+        case .noWindow:
+            // The polite reopen paths have had every attempt in the loop above and Teams
+            // still has no window. Only a caller that can weigh focus against recovery
+            // should decide what happens next, so say precisely what is wrong.
+            throw TeamsAccessibilityError.couldNotReopenWindow
+        case .minimized:
+            throw TeamsAccessibilityError.couldNotUnminimize
+        default:
+            throw TeamsAccessibilityError.treeUnavailable(attempts: attempts, elapsed: elapsed)
+        }
     }
 
     /// If a Teams flyout/dialog is hiding the rest of the tree, press Escape until the
@@ -453,6 +470,49 @@ public final class TeamsAccessibility {
             let code = (errorInfo[NSAppleScript.errorNumber] as? Int) ?? 0
             Log.accessibility.error("AppleScript reopen failed (\(code, privacy: .public)); Teams may need to be opened manually")
         }
+    }
+
+    /// Last-resort window recovery: activate Teams, let it rebuild a window, hand focus back.
+    ///
+    /// Every other route in this file is deliberately focus-preserving, and they are tried
+    /// first and repeatedly. But a Teams that has been quit and relaunched can sit running
+    /// with zero windows, and in that state `NSWorkspace.openApplication`, `open -g` and
+    /// the Standard Suite `reopen` verb all return success and produce nothing. Observed
+    /// 2026-08-20 after an automatic restart: only activation actually recreated a window.
+    ///
+    /// So this exists, and it is the only place in the app that will take focus. It is
+    /// gated by the caller — see `TeamsRestartRecovery.decideActivation` — and it gives the
+    /// focus straight back, so the visible cost is Teams flashing forward for about a
+    /// second rather than the user losing what they were doing.
+    ///
+    /// Returns whether a usable window exists afterwards.
+    @discardableResult
+    public func activateToRestoreWindow(timeout: TimeInterval = 10) -> Bool {
+        guard let teams = TeamsProcesses.runningApp() else { return false }
+
+        // Captured before anything is activated, so focus can go back where it was. Nil
+        // when nothing is frontmost, in which case there is nothing to restore.
+        let previous = NSWorkspace.shared.frontmostApplication
+        let previousName = previous?.localizedName ?? "nothing"
+        Log.accessibility.info("activating Teams to rebuild its window; will return focus to \(previousName, privacy: .public)")
+
+        teams.activate(options: [])
+        let recovered = AXPoll.wait(timeout: timeout) { self.health() != .noWindow }
+
+        // Hand focus back even when recovery failed: the user did not ask for Teams to be
+        // in front either way, and leaving it there is the rudest possible outcome.
+        if let previous, previous.processIdentifier != teams.processIdentifier {
+            if previous.isTerminated {
+                Log.accessibility.info("not restoring focus: \(previousName, privacy: .public) is no longer running")
+            } else if !previous.activate(options: []) {
+                // A warning, not a retry loop. Repeatedly flapping activation between two
+                // apps would be far worse for the user than one misplaced focus.
+                Log.accessibility.error("could not return focus to \(previousName, privacy: .public) after window recovery")
+            }
+        }
+
+        Log.accessibility.info("window recovery by activation \(recovered ? "succeeded" : "failed", privacy: .public)")
+        return recovered
     }
 
     /// Restore every minimized Teams window, without activating the application.

@@ -75,7 +75,7 @@ struct GeneralSettingsTab: View {
                 Section {
                     Toggle("Launch at login", isOn: Binding(
                         get: { environment.loginItem.isEnabled },
-                        set: { environment.loginItem.setEnabled($0) }
+                        set: { environment.setLaunchAtLogin($0, userInitiated: true) }
                     ))
                     if let error = environment.loginItem.lastError {
                         Text(error).font(.caption).foregroundStyle(.red)

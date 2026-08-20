@@ -70,6 +70,51 @@ case "enable":
         exit(1)
     }
 
+case "recover-window":
+    // The zero-window escalation, exercised deterministically. Prints the frontmost app
+    // before and after so focus restoration is verifiable rather than asserted.
+    requirePermission()
+    printHeader("Window recovery by activation")
+    let before = NSWorkspace.shared.frontmostApplication?.localizedName ?? "none"
+    print("health before: \(accessibility.health())")
+    print("frontmost before: \(before)")
+    let recovered = accessibility.activateToRestoreWindow()
+    Thread.sleep(forTimeInterval: 1.5)
+    let after = NSWorkspace.shared.frontmostApplication?.localizedName ?? "none"
+    print("recovered: \(recovered)")
+    print("health after: \(accessibility.health())")
+    print("frontmost after: \(after)")
+    print(before == after
+          ? "FOCUS RESTORED"
+          : "FOCUS NOT RESTORED (was \(before), now \(after))")
+    exit(recovered && before == after ? 0 : 1)
+
+case "restart-teams":
+    // The treeUnavailable escalation's actuator, on demand. Honours the same call-safety
+    // rule as the automatic path: it refuses while audio is being captured.
+    requirePermission()
+    printHeader("Controlled Teams restart")
+    if TeamsRestartRecovery.isAudioCaptureActive {
+        print("REFUSED: audio capture is active — a call may be in progress")
+        exit(2)
+    }
+    let ok = await TeamsRestartRecovery.restartTeams()
+    print("restarted: \(ok)")
+    if ok {
+        target.handleTeamsRestart()
+        do {
+            try accessibility.ensureHealthy()
+            print("health after: \(accessibility.health())")
+        } catch {
+            print("health after: FAILED — \(error.localizedDescription)")
+            exit(1)
+        }
+    }
+    exit(ok ? 0 : 1)
+
+case "audio":
+    print("audioCaptureActive: \(TeamsRestartRecovery.isAudioCaptureActive)")
+
 case "selftest":
     requirePermission()
     printHeader("Selector self-test")

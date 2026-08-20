@@ -13,6 +13,8 @@ public final class AppSettings: ObservableObject {
         static let sourceKind = "sourceKind"
         /// Set only when the *user* picks a source, never by migration.
         static let sourceChosenExplicitly = "sourceChosenExplicitly"
+        /// Set only when the *user* changes launch-at-login, never by the default below.
+        static let launchAtLoginChosenExplicitly = "launchAtLoginChosenExplicitly"
         static let template = "statusTemplate"
         static let pauseGrace = "pauseGraceSeconds"
         static let debounce = "debounceSeconds"
@@ -152,6 +154,18 @@ public final class AppSettings: ObservableObject {
         defaults.set(PresenceSourceKind.spotifyWebAPI.rawValue, forKey: Key.sourceKind)
         Log.coordinator.info("preserved the Spotify Web API source for an install that has credentials")
         return .spotifyWebAPI
+    }
+
+    /// Whether the user has ever expressed a launch-at-login preference.
+    ///
+    /// The app enables launch-at-login when onboarding completes, because "install once
+    /// and forget it" is impossible without it — an app that does not come back after a
+    /// reboot has to be noticed and restarted by hand, which is the whole failure this is
+    /// meant to prevent. But a default is not a decision, and once someone turns it off it
+    /// must stay off; this flag is what separates the two.
+    public var launchAtLoginChosenExplicitly: Bool {
+        get { defaults.bool(forKey: Key.launchAtLoginChosenExplicitly) }
+        set { defaults.set(newValue, forKey: Key.launchAtLoginChosenExplicitly) }
     }
 
     @Published public var sourceKind: PresenceSourceKind {
