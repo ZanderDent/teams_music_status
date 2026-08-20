@@ -52,6 +52,14 @@ public final class PresenceCoordinator: ObservableObject {
     /// counter because the escalation is different: a missing window wants activation,
     /// a dead tree wants a restart.
     private var consecutiveNoWindowFailures = 0
+    /// Failed Teams status operations in a row, whatever the symptom. Reset by any
+    /// success, so intermittent working ticks never accumulate toward a restart.
+    private var consecutiveOperationFailures = 0
+    private var firstOperationFailureAt: Date?
+    /// True only while a restart *this app initiated* is in flight. The terminate observer
+    /// keys on it so a user quitting Teams is never mistaken for our own quit — intent is
+    /// tracked, not inferred afterwards.
+    private var ownsTeamsQuit = false
     private var teamsActivations = 0
     private var lastTeamsActivation: Date?
     private var isActivatingTeams = false
@@ -344,10 +352,7 @@ public final class PresenceCoordinator: ObservableObject {
                                        previousTeamsStatus: current, at: Date())
                 restoreStore.save(from: engineState)
                 lastWarnings = target.lastWarnings
-                consecutiveFailures = 0
-                consecutiveSelectorFailures = 0
-                consecutiveTreeFailures = 0
-                consecutiveNoWindowFailures = 0
+                clearFailureStreaks()
                 state = .ready
                 Log.coordinator.info("Teams status updated: \(Redact.status(status), privacy: .public)")
             } catch {
@@ -449,25 +454,45 @@ public final class PresenceCoordinator: ObservableObject {
             return
         }
 
+        performTeamsRestart()
+    }
+
+    /// Execute the restart. Separated from the decision so the symptom-specific path and
+    /// the generic sustained-failure path share one implementation, one cap and one
+    /// ownership flag rather than drifting apart.
+    private func performTeamsRestart() {
+        guard !isRestartingTeams else { return }
         isRestartingTeams = true
         teamsRestarts += 1
         lastTeamsRestart = Date()
 
+        ownsTeamsQuit = true
         Task { [weak self] in
-            let recovered = await TeamsRestartRecovery.restartTeams()
+            let outcome = await TeamsRestartRecovery.restartTeams()
             await MainActor.run {
                 guard let self else { return }
                 self.isRestartingTeams = false
+                self.ownsTeamsQuit = false
                 // The observer is bound to the old process; without this the next
                 // ensureHealthy would watch a pid that no longer exists.
                 self.target.handleTeamsRestart()
-                if recovered {
-                    // Give the relaunched Teams a chance to expose its tree before the next
-                    // read, rather than counting the inevitable first failure against it.
-                    self.consecutiveTreeFailures = 0
-                    self.consecutiveNoWindowFailures = 0
+                switch outcome {
+                case .relaunched:
+                    // A new process exists. Whether Teams is *usable* is established by the
+                    // next tick doing a real status operation — a relaunch is not a fix
+                    // until something actually succeeds.
+                    self.clearFailureStreaks()
                     self.state = .teamsRestartedAutomatically
                     self.refreshSoon()
+                case .notRunning:
+                    // Teams went away between the decision and the action, or the user quit
+                    // it. Not ours to bring back.
+                    self.state = .teamsNotRunning
+                case .quitFailed, .relaunchFailed:
+                    // Teams is gone and will not come back, or would not go away. Retrying
+                    // cannot help and looping is the failure this exists to prevent.
+                    Log.coordinator.error("automatic recovery could not restore Teams (\(String(describing: outcome), privacy: .public))")
+                    self.state = .recoveryExhausted
                 }
             }
         }
@@ -531,6 +556,50 @@ public final class PresenceCoordinator: ObservableObject {
         }
     }
 
+    /// Clear every failure streak. Called on any successful Teams operation, so a single
+    /// working tick undoes all accumulated suspicion.
+    private func clearFailureStreaks() {
+        consecutiveFailures = 0
+        consecutiveSelectorFailures = 0
+        consecutiveTreeFailures = 0
+        consecutiveNoWindowFailures = 0
+        consecutiveOperationFailures = 0
+        firstOperationFailureAt = nil
+    }
+
+    /// Record a failed status operation and escalate if Teams has been unusable for long
+    /// enough to stop believing it will fix itself.
+    ///
+    /// This is the general case behind the two symptom-specific escalations. It exists
+    /// because Teams can report itself perfectly healthy and still refuse every control,
+    /// and no amount of accessibility repair addresses that — the app was left retrying
+    /// the same failing operation indefinitely.
+    private func noteOperationFailure() {
+        consecutiveOperationFailures += 1
+        if firstOperationFailureAt == nil { firstOperationFailureAt = Date() }
+
+        let decision = TeamsRestartRecovery.decideSustainedFailureRestart(
+            consecutiveOperationFailures: consecutiveOperationFailures,
+            secondsSinceFirstFailure: firstOperationFailureAt.map { -$0.timeIntervalSinceNow } ?? 0,
+            // No playback means no work, and an unusable Teams is not worth restarting an
+            // application over until there is actually something to put in it.
+            hasSomethingToSync: renderedStatus != nil,
+            audioCaptureActive: TeamsRestartRecovery.isAudioCaptureActive,
+            restartsSoFar: teamsRestarts,
+            secondsSinceLastRestart: lastTeamsRestart.map { -$0.timeIntervalSinceNow },
+            recoveryInProgress: isRestartingTeams || isActivatingTeams)
+
+        guard decision.isGo else {
+            if case .wait(let reason) = decision {
+                Log.coordinator.info("sustained-failure escalation held: \(reason, privacy: .public)")
+                state = Self.waitingState(for: reason, fallback: state)
+            }
+            return
+        }
+        Log.coordinator.error("Teams has been unable to complete a status operation \(self.consecutiveOperationFailures, privacy: .public) times; restarting it")
+        performTeamsRestart()
+    }
+
     private func handleTargetError(_ error: Error) {
         lastWarnings = target.lastWarnings
         switch error {
@@ -575,13 +644,19 @@ public final class PresenceCoordinator: ObservableObject {
             } else {
                 Log.coordinator.warning("selector '\(selector, privacy: .public)' not found (\(self.consecutiveSelectorFailures, privacy: .public) in a row); retrying")
                 state = .recovering
+                noteOperationFailure()
             }
         default:
+            // Everything that is not a recognised structural problem: a control that will
+            // not activate, a status Teams would not accept, anything new. One of these is
+            // ordinary; a sustained run of them means Teams is unusable regardless of what
+            // its accessibility surface reports, and that is what escalates.
             consecutiveFailures += 1
             state = consecutiveFailures >= 3
                 ? .teamsAccessibilityTreeUnavailable
                 : .recovering
             Log.coordinator.error("Teams update failed: \(error.localizedDescription, privacy: .public)")
+            noteOperationFailure()
         }
     }
 
@@ -600,10 +675,20 @@ public final class PresenceCoordinator: ObservableObject {
                   app.bundleIdentifier == TeamsProcesses.bundleIdentifier else { return }
             Task { @MainActor in
                 guard let self else { return }
-                Log.coordinator.info("Teams quit")
                 self.target.handleTeamsRestart()
                 self.knownTeamsPID = nil
-                if self.isEnabled { self.state = .teamsNotRunning }
+                if self.ownsTeamsQuit {
+                    // Our own restart is mid-flight and owns bringing Teams back. Say so
+                    // rather than reporting it as the user's Teams having gone away.
+                    Log.coordinator.info("Teams quit as part of an automatic restart")
+                } else {
+                    // The user quit Teams. Nothing in this app may resurrect it — the
+                    // generic escalation is gated on Teams running, and the restart
+                    // actuator refuses outright when it is not.
+                    Log.coordinator.info("Teams was quit by the user; not relaunching")
+                    self.clearFailureStreaks()
+                    if self.isEnabled { self.state = .teamsNotRunning }
+                }
             }
         }
 

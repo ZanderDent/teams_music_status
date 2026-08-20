@@ -54,6 +54,15 @@ public enum TeamsRestartRecovery {
         public var activationCooldown: TimeInterval = 3 * 60
         public var maxActivations = 5
 
+        /// Consecutive failed status operations before Teams is presumed unusable,
+        /// whatever its accessibility surface claims. Several, because a single AX
+        /// failure is ordinary — controls miss activations, trees settle late, and
+        /// treating one as "Teams is broken" would restart it constantly.
+        public var operationFailuresBeforeRestart = 4
+        /// And they must have persisted. A burst of four failures inside a few seconds is
+        /// one bad moment; four spread across two minutes is a Teams that is not working.
+        public var sustainedFailureInterval: TimeInterval = 120
+
         public init() {}
     }
 
@@ -134,6 +143,59 @@ public enum TeamsRestartRecovery {
         return .proceed
     }
 
+    /// The general invariant, of which `decide` and `decideActivation` are special cases.
+    ///
+    /// Teams can be structurally healthy — running, windowed, tree exposed — and still be
+    /// unable to complete a status operation. Observed 2026-08-20: the profile control
+    /// refused AXPress, Return and Space for four minutes straight while `health()`
+    /// reported `healthy` throughout, so neither of the symptom-specific escalations
+    /// applied and the app retried the same failing operation indefinitely.
+    ///
+    /// This is the backstop for that whole class: whatever the symptom, if the app cannot
+    /// complete a Teams operation for a sustained period while there is genuinely
+    /// something to sync, it escalates once to a bounded restart rather than looping.
+    ///
+    /// - Parameters:
+    ///   - consecutiveOperationFailures: failed status reads/writes in a row. Reset by any
+    ///     success, so intermittent working ticks can never accumulate toward a restart.
+    ///   - secondsSinceFirstFailure: how long the current streak has persisted.
+    ///   - hasSomethingToSync: no playback means no work, and Teams being unusable is not
+    ///     a problem worth restarting an application over.
+    ///   - recoveryInProgress: a restart or activation already owns the recovery.
+    public static func decideSustainedFailureRestart(consecutiveOperationFailures: Int,
+                                                    secondsSinceFirstFailure: TimeInterval,
+                                                    hasSomethingToSync: Bool,
+                                                    audioCaptureActive: Bool,
+                                                    restartsSoFar: Int,
+                                                    secondsSinceLastRestart: TimeInterval?,
+                                                    recoveryInProgress: Bool = false,
+                                                    policy: Policy = Policy()) -> Decision {
+        guard !recoveryInProgress else {
+            return .wait("a recovery operation is already in progress")
+        }
+        guard hasSomethingToSync else {
+            return .wait("nothing to sync — Teams does not need to be usable right now")
+        }
+        guard consecutiveOperationFailures >= policy.operationFailuresBeforeRestart else {
+            return .wait("status operations have not failed enough to call Teams broken "
+                       + "(\(consecutiveOperationFailures)/\(policy.operationFailuresBeforeRestart))")
+        }
+        guard secondsSinceFirstFailure >= policy.sustainedFailureInterval else {
+            return .wait("failures have not persisted long enough "
+                       + "(\(Int(secondsSinceFirstFailure))s/\(Int(policy.sustainedFailureInterval))s)")
+        }
+        if audioCaptureActive {
+            return .wait("audio capture is active — not interrupting a call")
+        }
+        guard restartsSoFar < policy.maxRestarts else {
+            return .wait("restart cap reached (\(policy.maxRestarts)); a restart cannot fix this")
+        }
+        if let elapsed = secondsSinceLastRestart, elapsed < policy.cooldown {
+            return .wait("restarted \(Int(elapsed))s ago; cooling down")
+        }
+        return .proceed
+    }
+
     // MARK: - Audio capture probe
 
     /// Whether any input device is running, which is the closest thing to a reliable
@@ -174,56 +236,86 @@ public enum TeamsRestartRecovery {
 
     // MARK: - The actuator
 
-    /// Quit Teams and bring it back without stealing focus.
+    /// What a restart actually achieved. `open` returning success is not evidence Teams
+    /// came back — observed 2026-08-20, when a restart quit Teams cleanly and left the
+    /// machine with no Teams at all until it was relaunched by hand. Anything that treats
+    /// a launch request as a completed relaunch is not a recovery mechanism.
+    public enum RestartOutcome: Equatable, Sendable {
+        /// A new Teams process is running. Whether it is *usable* is the caller's to
+        /// establish, by running accessibility recovery and a real status operation.
+        case relaunched
+        /// Teams was not running, so there was nothing to restart and nothing to own.
+        case notRunning
+        /// Teams would not quit, even after being forced.
+        case quitFailed
+        /// Teams quit but could not be brought back. This is the state that must end in
+        /// `recoveryExhausted` rather than another attempt.
+        case relaunchFailed
+
+        public var isRelaunched: Bool { self == .relaunched }
+    }
+
+    /// Quit Teams and bring it back, transactionally, verifying each step by process state
+    /// rather than by return codes.
     ///
-    /// Graceful first: `terminate()` lets Teams close its own windows and save state. Only
-    /// a Teams that refuses to go within the grace period is forced, because a forced quit
-    /// is what leaves the stale flyouts `dismissStaleDialog` exists to clean up.
-    ///
-    /// Returns whether Teams was running again afterwards.
-    @discardableResult
-    public static func restartTeams(gracePeriod: TimeInterval = 10,
-                                    relaunchTimeout: TimeInterval = 30) async -> Bool {
+    /// The quit half runs exactly once. If Teams is already gone, only the launch half is
+    /// retried — repeatedly quitting something that has already quit is how a recovery
+    /// turns into the outage it was meant to fix.
+    public static func restartTeams(quitGracePeriod: TimeInterval = 10,
+                                    launchAttempts: Int = 3,
+                                    launchTimeout: TimeInterval = 30) async -> RestartOutcome {
         guard let app = TeamsProcesses.runningApp() else {
-            Log.accessibility.info("Teams is not running; nothing to restart")
-            return false
+            Log.accessibility.info("Teams is not running; nothing to restart and nothing to relaunch")
+            return .notRunning
         }
         guard let url = TeamsProcesses.applicationURL() else {
             Log.accessibility.error("cannot locate Microsoft Teams to relaunch it; leaving it alone")
-            return false
+            return .quitFailed
         }
 
-        Log.accessibility.error("Teams' accessibility tree is unrecoverable in place; restarting Teams")
+        // Remembered so a relaunch is confirmed by a *different* process, not by the old
+        // one still lingering in the process table.
+        let oldPID = app.processIdentifier
+        Log.accessibility.error("restarting Teams (pid \(oldPID, privacy: .public)) — recovery has exhausted every in-place repair")
+
         app.terminate()
-
-        let deadline = Date().addingTimeInterval(gracePeriod)
-        while TeamsProcesses.isRunning && Date() < deadline {
-            try? await Task.sleep(nanoseconds: 500_000_000)
-        }
-        if TeamsProcesses.isRunning {
-            Log.accessibility.info("Teams did not quit within \(Int(gracePeriod), privacy: .public)s; forcing")
+        if !(await waitUntil(quitGracePeriod, { TeamsProcesses.pid() != oldPID })) {
+            Log.accessibility.info("Teams did not quit within \(Int(quitGracePeriod), privacy: .public)s; forcing")
             TeamsProcesses.runningApp()?.forceTerminate()
-            try? await Task.sleep(nanoseconds: 2_000_000_000)
+            if !(await waitUntil(5, { TeamsProcesses.pid() != oldPID })) {
+                Log.accessibility.error("Teams could not be terminated; abandoning the restart")
+                return .quitFailed
+            }
         }
 
-        // Relaunch without activating, exactly as the window-reopen path does: recovery
-        // must never pull the user out of what they are doing.
-        let configuration = NSWorkspace.OpenConfiguration()
-        configuration.activates = false
-        configuration.addsToRecentItems = false
-        do {
-            _ = try await NSWorkspace.shared.openApplication(at: url, configuration: configuration)
-        } catch {
-            Log.accessibility.error("failed to relaunch Teams: \(error.localizedDescription, privacy: .public)")
-            return false
+        // Launch-only retries. The quit above already happened and must not repeat.
+        for attempt in 1...max(1, launchAttempts) {
+            let configuration = NSWorkspace.OpenConfiguration()
+            configuration.activates = false
+            configuration.addsToRecentItems = false
+            do {
+                _ = try await NSWorkspace.shared.openApplication(at: url, configuration: configuration)
+            } catch {
+                Log.accessibility.error("Teams launch attempt \(attempt, privacy: .public) failed: \(error.localizedDescription, privacy: .public)")
+            }
+            // A launch request is not a launch. Only a live process with a new pid is.
+            if await waitUntil(launchTimeout, { TeamsProcesses.pid().map { $0 != oldPID } ?? false }) {
+                Log.accessibility.info("Teams relaunched on attempt \(attempt, privacy: .public) (pid \(TeamsProcesses.pid() ?? -1, privacy: .public))")
+                return .relaunched
+            }
+            Log.accessibility.error("Teams did not appear after launch attempt \(attempt, privacy: .public)")
         }
 
-        let relaunchDeadline = Date().addingTimeInterval(relaunchTimeout)
-        while !TeamsProcesses.isRunning && Date() < relaunchDeadline {
-            try? await Task.sleep(nanoseconds: 500_000_000)
+        Log.accessibility.error("Teams could not be relaunched after \(launchAttempts, privacy: .public) attempts")
+        return .relaunchFailed
+    }
+
+    private static func waitUntil(_ timeout: TimeInterval, _ condition: () -> Bool) async -> Bool {
+        let deadline = Date().addingTimeInterval(timeout)
+        while Date() < deadline {
+            if condition() { return true }
+            try? await Task.sleep(nanoseconds: 400_000_000)
         }
-        let running = TeamsProcesses.isRunning
-        Log.accessibility.info("Teams restart \(running ? "completed" : "did not bring Teams back", privacy: .public)")
-        return running
+        return condition()
     }
 }

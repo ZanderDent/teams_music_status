@@ -45,6 +45,34 @@ func requirePermission() {
     }
 }
 
+// Commands that drive the Teams UI cannot safely run while the production app is doing
+// the same thing: `TeamsUI.exclusive` serialises callers inside one process, not across
+// processes, so two of them interleave halfway through a flyout and both fail. That is not
+// a hypothetical — it manufactured a four-minute "profile button did not respond"
+// stall during acceptance and contaminated the result.
+//
+// Read-only inspection (`health`, `audio`, `version`) is unaffected and stays available.
+let uiDrivingCommands: Set<String> = [
+    "get", "set", "clear", "selftest", "gate", "enable", "recover-window", "restart-teams",
+]
+if uiDrivingCommands.contains(command), !CommandLine.arguments.contains("--allow-contention") {
+    let running = NSWorkspace.shared.runningApplications.contains {
+        $0.bundleIdentifier == "com.zanderdent.TeamsMusicStatus"
+    }
+    if running {
+        FileHandle.standardError.write(Data("""
+        refusing to run '\(command)': Teams Music Status is running and drives the same
+        Teams UI. Two processes interleaving AX operations produce failures that belong to
+        neither of them.
+
+        Quit the app first (osascript -e 'quit app id "com.zanderdent.TeamsMusicStatus"'),
+        or pass --allow-contention if you are deliberately testing contention.
+
+        """.utf8))
+        exit(3)
+    }
+}
+
 switch command {
 
 case "version":
@@ -98,8 +126,9 @@ case "restart-teams":
         print("REFUSED: audio capture is active — a call may be in progress")
         exit(2)
     }
-    let ok = await TeamsRestartRecovery.restartTeams()
-    print("restarted: \(ok)")
+    let outcome = await TeamsRestartRecovery.restartTeams()
+    print("outcome: \(outcome)")
+    let ok = outcome.isRelaunched
     if ok {
         target.handleTeamsRestart()
         do {
