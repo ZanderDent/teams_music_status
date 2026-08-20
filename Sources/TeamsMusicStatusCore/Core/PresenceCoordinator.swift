@@ -480,8 +480,9 @@ public final class PresenceCoordinator: ObservableObject {
                 case .relaunched:
                     // A new process exists. Whether Teams is *usable* is established by the
                     // next tick doing a real status operation — a relaunch is not a fix
-                    // until something actually succeeds.
-                    self.clearFailureStreaks()
+                    // until something actually succeeds, so the generic streak stands.
+                    self.consecutiveTreeFailures = 0
+                    self.consecutiveNoWindowFailures = 0
                     self.state = .teamsRestartedAutomatically
                     self.refreshSoon()
                 case .notRunning:
@@ -548,6 +549,11 @@ public final class PresenceCoordinator: ObservableObject {
             await MainActor.run {
                 self.isActivatingTeams = false
                 if recovered {
+                    // Deliberately clears only the window-specific streak. The generic
+                    // counter keeps running until a status operation actually completes:
+                    // observed 2026-08-20, activation produced a window that vanished
+                    // again within a second, and resetting on that "success" restarted the
+                    // whole cycle instead of escalating.
                     self.consecutiveNoWindowFailures = 0
                     self.state = .recovering
                     self.refreshSoon()
@@ -610,12 +616,19 @@ public final class PresenceCoordinator: ObservableObject {
         case TeamsAccessibilityError.treeUnavailable:
             state = .teamsAccessibilityTreeUnavailable
             consecutiveTreeFailures += 1
+            // Also counted generically: the specialised escalation may act sooner, but if
+            // it keeps nominally succeeding without the status operation ever completing,
+            // the backstop beneath must still see a Teams that does not work.
+            noteOperationFailure()
             considerRestartingTeams()
         case TeamsAccessibilityError.couldNotReopenWindow:
             // Teams is running with no window and the focus-preserving routes have all
-            // failed. Escalate to activation, which is the only thing that works.
+            // failed. Escalate to activation first — it is cheaper than a restart — but
+            // count it generically too, so a Teams whose window keeps vanishing again
+            // eventually reaches the restart backstop instead of cycling here forever.
             state = .recovering
             consecutiveNoWindowFailures += 1
+            noteOperationFailure()
             considerActivatingTeams()
         case TeamsAccessibilityError.signedOut:
             // Not a failure to fix. Teams wants the user, and the kindest thing this app

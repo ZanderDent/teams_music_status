@@ -142,3 +142,56 @@ final class SustainedFailureRecoveryTests: XCTestCase {
         XCTAssertNotEqual(outcome, .relaunchFailed)
     }
 }
+
+/// Regressions from the live soak on 2026-08-20, where the layered escalation cycled
+/// instead of escalating. Both defects were invisible to unit tests and to manual actuator
+/// calls; only watching the coordinator run unaided exposed them.
+final class LayeredEscalationRegressionTests: XCTestCase {
+
+    private let policy = TeamsRestartRecovery.Policy()
+
+    /// A cheap recovery reporting success must not, by itself, clear the generic streak.
+    ///
+    /// Activation produced a window, `health()` stopped reporting `noWindow`, the streak
+    /// reset, the window vanished, and the cycle began again — 1/2, 2/2, activate, reset,
+    /// forever. Only a completed status operation may count as recovery, so the generic
+    /// counter has to survive an apparently-successful repair.
+    func testGenericStreakSurvivesAnApparentlySuccessfulRepair() {
+        // Four sustained failures reached while a cheap repair keeps "succeeding".
+        let decision = TeamsRestartRecovery.decideSustainedFailureRestart(
+            consecutiveOperationFailures: policy.operationFailuresBeforeRestart,
+            secondsSinceFirstFailure: policy.sustainedFailureInterval + 1,
+            hasSomethingToSync: true,
+            audioCaptureActive: false,
+            restartsSoFar: 0,
+            secondsSinceLastRestart: nil,
+            recoveryInProgress: false,
+            policy: policy)
+        XCTAssertTrue(decision.isGo,
+                      "a repair that never yields a working status operation must still escalate")
+    }
+
+    /// The backstop must be reachable from every symptom, not only from the ones with no
+    /// specialised handler. A `noWindow` that recurs indefinitely has to end in a restart.
+    func testEverySymptomCanReachTheBackstop() {
+        for failures in [policy.operationFailuresBeforeRestart,
+                         policy.operationFailuresBeforeRestart + 5] {
+            let decision = TeamsRestartRecovery.decideSustainedFailureRestart(
+                consecutiveOperationFailures: failures,
+                secondsSinceFirstFailure: policy.sustainedFailureInterval + 1,
+                hasSomethingToSync: true,
+                audioCaptureActive: false,
+                restartsSoFar: 0,
+                secondsSinceLastRestart: nil,
+                policy: policy)
+            XCTAssertTrue(decision.isGo)
+        }
+    }
+
+    /// And the cheap path must still be preferred while it is plausibly working — the
+    /// backstop is beneath it, not instead of it.
+    func testTheCheapPathIsStillTriedFirst() {
+        XCTAssertLessThan(policy.failuresBeforeActivation, policy.operationFailuresBeforeRestart,
+                          "activation must be reachable before the restart backstop")
+    }
+}

@@ -497,7 +497,20 @@ public final class TeamsAccessibility {
         Log.accessibility.info("activating Teams to rebuild its window; will return focus to \(previousName, privacy: .public)")
 
         teams.activate(options: [])
-        let recovered = AXPoll.wait(timeout: timeout) { self.health() != .noWindow }
+        var recovered = AXPoll.wait(timeout: timeout) { self.health() != .noWindow }
+
+        // A window that appears and vanishes is not a recovery. Observed 2026-08-20:
+        // activation produced a window, `health()` stopped reporting `noWindow`, and by the
+        // time the next status operation ran it was gone again — which read as success and
+        // restarted the whole escalation cycle instead of escalating past it. Require the
+        // window to still be there a moment later before claiming anything.
+        if recovered {
+            Thread.sleep(forTimeInterval: 1.5)
+            if health() == .noWindow {
+                Log.accessibility.error("the window produced by activation vanished again; not counting it as recovered")
+                recovered = false
+            }
+        }
 
         // Hand focus back even when recovery failed: the user did not ask for Teams to be
         // in front either way, and leaving it there is the rudest possible outcome.
