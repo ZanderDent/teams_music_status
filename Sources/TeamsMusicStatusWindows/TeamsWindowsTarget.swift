@@ -207,6 +207,15 @@ public final class TeamsWindowsTarget: PresenceTarget, @unchecked Sendable {
     /// Empties the compose box and types `text`, verifying both halves by reading Teams
     /// back rather than trusting either operation to have landed.
     private func replaceComposeText(with text: String) throws {
+        // Put the caret in the compose box before touching the keyboard. Teams focuses it
+        // itself when the editor opens, but an editor inherited from an interrupted run has
+        // no focus, and typing then silently does nothing.
+        if let box = try UIASnapshot.capture().first(TeamsSelectors.composeBox),
+           let name = box.axDescription {
+            focus(named: name)
+            Thread.sleep(forTimeInterval: 0.25)
+        }
+
         // Cleared in rounds, re-reading what is left each time rather than trusting one
         // pass. The number of backspaces a contenteditable needs is not simply its
         // character count — an emoji or a combining sequence can take more than one, and a
@@ -342,6 +351,16 @@ public final class TeamsWindowsTarget: PresenceTarget, @unchecked Sendable {
         while TeamsSelectors.ourStatusSurfaces.contains(where: { snapshot.contains($0) }) {
             guard attempts < 3 else { return false }
             attempts += 1
+
+            // Escape also goes to whatever holds the caret, so a surface with no focus
+            // swallows it — which is exactly how the editor became unclosable. Claim the
+            // caret first, and the same Escape that did nothing now works.
+            if let box = snapshot.first(TeamsSelectors.composeBox), let name = box.axDescription {
+                focus(named: name)
+            } else if let readout = snapshot.first(TeamsSelectors.statusReadout),
+                      let name = readout.axDescription {
+                focus(named: name)
+            }
             _ = tw_post_key(Int32(TW_VK_ESCAPE))
             guard let settled = waitForSnapshot(timeout: 1.5, where: { snap in
                 !TeamsSelectors.ourStatusSurfaces.contains(where: { snap.contains($0) })
@@ -415,6 +434,20 @@ public final class TeamsWindowsTarget: PresenceTarget, @unchecked Sendable {
     private func typeIntoCompose(_ text: String) {
         var payload = Array(text.utf16); payload.append(0)
         _ = payload.withUnsafeBufferPointer { tw_type_text($0.baseAddress) }
+    }
+
+    /// Gives a control the caret, by its accessible name, through MSAA.
+    ///
+    /// Posted keys go wherever the caret is. A Teams surface left open by an interrupted
+    /// run has no focus at all, and in that state Backspace and Escape both land nowhere —
+    /// the editor cannot be typed into, cleared, or even closed. That is unrecoverable, and
+    /// it was reachable in practice: a soak run left the compose box holding 24 characters
+    /// that nothing could remove.
+    @discardableResult
+    private func focus(named name: String) -> Bool {
+        var utf16 = Array(name.utf16)
+        utf16.append(0)
+        return utf16.withUnsafeBufferPointer { tw_msaa_focus($0.baseAddress) } == TW_OK
     }
 
     /// Presses a control by its accessible name, through MSAA.

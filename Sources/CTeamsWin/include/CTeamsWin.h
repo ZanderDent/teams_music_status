@@ -174,6 +174,22 @@ int32_t tw_snapshot(TWNode *out, int32_t capacity, int32_t *count);
 int32_t tw_msaa_press(const uint16_t *namePrefix);
 
 /*
+ * Moves DOM focus to the element whose accessible name begins with `namePrefix`, via MSAA
+ * accSelect(SELFLAG_TAKEFOCUS).
+ *
+ * Necessary because posted keys go to whatever holds the caret, and a Teams surface left
+ * open by an interrupted run has no focus at all -- at which point Backspace and Escape
+ * both land nowhere and the app cannot type into, clear, or even close the editor. That is
+ * an unrecoverable state, and it was reachable in practice.
+ *
+ * MSAA specifically, again: UI Automation's SetFocus does the same job and drags the Teams
+ * window to the foreground, which is the one thing this product may not do.
+ *
+ * Delivered, not confirmed. Verify by observing what the keys then do.
+ */
+int32_t tw_msaa_focus(const uint16_t *namePrefix);
+
+/*
  * Posts a key to the renderer without activating Teams — the counterpart of the macOS
  * CGEvent.postToPid path.
  *

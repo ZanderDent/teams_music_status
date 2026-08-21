@@ -599,6 +599,29 @@ extern "C" int32_t tw_msaa_press(const uint16_t *namePrefix)
     return TW_ERR_NOT_FOUND;
 }
 
+extern "C" int32_t tw_msaa_focus(const uint16_t *namePrefix)
+{
+    std::lock_guard<std::recursive_mutex> guard(state().mutex);
+    if (namePrefix == nullptr) return TW_ERR_COM;
+    auto &s = state();
+    if (s.held.empty()) return TW_ERR_TREE_UNAVAIL;
+
+    const std::wstring prefix(reinterpret_cast<const wchar_t *>(namePrefix));
+
+    for (auto &doc : s.held) {
+        winrt::com_ptr<IAccessible> target;
+        VARIANT child;
+        VariantInit(&child);
+        if (!msaa_find(doc.get(), prefix, 0, target, child)) continue;
+        if (!target) continue;
+        // SELFLAG_TAKEFOCUS. Measured not to disturb the foreground window, unlike UI
+        // Automation's SetFocus.
+        target->accSelect(SELFLAG_TAKEFOCUS, child);
+        return TW_OK;
+    }
+    return TW_ERR_NOT_FOUND;
+}
+
 extern "C" int32_t tw_set_value(const uint16_t *automationId, const uint16_t *text)
 {
     std::lock_guard<std::recursive_mutex> guard(state().mutex);
