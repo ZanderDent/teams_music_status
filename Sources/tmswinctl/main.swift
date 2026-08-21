@@ -19,6 +19,7 @@ func usage() -> Never {
       teams-set <text>       write and commit a status message
       teams-clear            remove the status message
       sync-once [template]   read what is playing, render it, publish it, verify
+      run [--seconds N]      run the real sync loop (what the tray app runs)
       gate                   Hard Gate 0 acceptance matrix (writes and restores status)
       health                 Teams version, health state, frontmost window
       version
@@ -189,6 +190,42 @@ case "sync-once":
     } catch {
         FileHandle.standardError.write(Data("error: \(error.localizedDescription)\n".utf8))
         exit(1)
+    }
+
+case "run":
+    // The whole product, headless: poll the source, drive SyncEngine, publish to Teams.
+    // The tray application runs exactly this; here it is visible in a terminal.
+    let seconds = arguments.firstIndex(of: "--seconds").flatMap { index -> Double? in
+        arguments.count > index + 1 ? Double(arguments[index + 1]) : nil
+    }
+    let settings = WindowsSettings()
+    let coordinator = WindowsPresenceCoordinator(settings: settings,
+                                                 source: WindowsMediaSource())
+
+    print("settings   : \(settings.location.path)")
+    print("template   : \(settings.template.raw)")
+    print("poll       : \(settings.pollInterval)s   debounce: \(settings.debounce)s   grace: \(settings.pauseGrace)s")
+    print("log        : \(Log.logFileURL.path)")
+    print(seconds.map { "running for \(Int($0))s…\n" } ?? "running — press Ctrl+C to stop\n")
+
+    coordinator.onStatusChange = { status in
+        var line = "[\(status.targetAvailability)]"
+        if let playing = status.nowPlaying { line += "  playing: \(playing)" }
+        if let published = status.lastPublished { line += "  published: \(published)" }
+        if status.manualOverride { line += "  MANUAL OVERRIDE — sync paused" }
+        if let error = status.lastError { line += "  error: \(error)" }
+        print(line)
+    }
+
+    coordinator.start()
+    if let seconds {
+        Thread.sleep(forTimeInterval: seconds)
+        // Restores the status the user had before this run, unless they have since
+        // replaced it themselves.
+        coordinator.stop(restore: true)
+        print("\nstopped, original status restored")
+    } else {
+        while true { Thread.sleep(forTimeInterval: 3600) }
     }
 
 case "gate":

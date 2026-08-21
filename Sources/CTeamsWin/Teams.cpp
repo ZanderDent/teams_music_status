@@ -386,6 +386,77 @@ extern "C" int32_t tw_teams_version(uint16_t *out, int32_t capacity)
     return TW_OK;
 }
 
+namespace {
+
+struct TitleScan {
+    std::wstring joined;
+    std::vector<DWORD> pids;
+};
+
+} // namespace
+
+extern "C" int32_t tw_teams_window_titles(uint16_t *out, int32_t capacity)
+{
+    if (out == nullptr || capacity <= 0) return TW_ERR_COM;
+    out[0] = 0;
+
+    TitleScan scan;
+    {
+        winrt::handle snapshot{CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0)};
+        if (!snapshot) return TW_ERR_NO_TEAMS;
+        PROCESSENTRY32W entry{};
+        entry.dwSize = sizeof(entry);
+        if (Process32FirstW(snapshot.get(), &entry)) {
+            do {
+                if (_wcsicmp(entry.szExeFile, L"ms-teams.exe") == 0)
+                    scan.pids.push_back(entry.th32ProcessID);
+            } while (Process32NextW(snapshot.get(), &entry));
+        }
+    }
+    if (scan.pids.empty()) return TW_ERR_NO_TEAMS;
+
+    EnumWindows([](HWND h, LPARAM param) -> BOOL {
+        auto &s = *reinterpret_cast<TitleScan *>(param);
+        if (!IsWindowVisible(h)) return TRUE;
+
+        DWORD pid = 0;
+        GetWindowThreadProcessId(h, &pid);
+        if (std::find(s.pids.begin(), s.pids.end(), pid) == s.pids.end()) return TRUE;
+
+        wchar_t title[512] = {};
+        if (GetWindowTextW(h, title, 512) <= 0) return TRUE;
+        if (!s.joined.empty()) s.joined += L"\n";
+        s.joined += title;
+        return TRUE;
+    }, reinterpret_cast<LPARAM>(&scan));
+
+    copy_out(out, static_cast<size_t>(capacity), scan.joined);
+    return TW_OK;
+}
+
+extern "C" int32_t tw_teams_is_frontmost(void)
+{
+    HWND fore = GetForegroundWindow();
+    if (fore == nullptr) return 0;
+
+    DWORD forePid = 0;
+    GetWindowThreadProcessId(fore, &forePid);
+    if (forePid == 0) return 0;
+
+    winrt::handle process{OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, forePid)};
+    if (!process) return 0;
+
+    wchar_t path[MAX_PATH] = {};
+    DWORD size = MAX_PATH;
+    if (!QueryFullProcessImageNameW(process.get(), 0, path, &size)) return 0;
+
+    // Compare the executable rather than the window title: Teams titles are page-authored
+    // and a chat named "Microsoft Teams" would otherwise read as Teams being frontmost.
+    const wchar_t *leaf = wcsrchr(path, L'\\');
+    leaf = leaf ? leaf + 1 : path;
+    return _wcsicmp(leaf, L"ms-teams.exe") == 0 ? 1 : 0;
+}
+
 extern "C" int32_t tw_foreground_title(uint16_t *out, int32_t capacity)
 {
     if (out == nullptr || capacity <= 0) return TW_ERR_COM;

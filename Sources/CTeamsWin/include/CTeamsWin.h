@@ -93,6 +93,18 @@ int32_t tw_window_minimize(void);
 int32_t tw_teams_version(uint16_t *out, int32_t capacity);
 
 /*
+ * Every top-level Teams window title, newline-separated.
+ *
+ * Used to notice that Teams is asking the user to authenticate, so the app can stand down
+ * instead of driving a login sheet. Titles only: one string read per window, rather than a
+ * walk of the tree, so it is cheap enough for the polling path.
+ */
+int32_t tw_teams_window_titles(uint16_t *out, int32_t capacity);
+
+/* Whether a Teams window currently has the foreground — i.e. the user is working in it. */
+int32_t tw_teams_is_frontmost(void);
+
+/*
  * The title of the window that currently has the foreground.
  *
  * Instrumentation for the acceptance gate, which has to *prove* the frontmost window is
