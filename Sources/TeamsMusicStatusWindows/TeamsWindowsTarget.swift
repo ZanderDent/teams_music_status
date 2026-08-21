@@ -184,15 +184,22 @@ public final class TeamsWindowsTarget: PresenceTarget, @unchecked Sendable {
     /// Empties the compose box and types `text`, verifying both halves by reading Teams
     /// back rather than trusting either operation to have landed.
     private func replaceComposeText(with text: String) throws {
-        let existing = try composeText() ?? ""
+        // Cleared in rounds, re-reading what is left each time rather than trusting one
+        // pass. The number of backspaces a contenteditable needs is not simply its
+        // character count — an emoji or a combining sequence can take more than one, and a
+        // single under-shooting pass leaves text behind that the new text is then appended
+        // to. Observed in practice as a write failing with the *previous* track still in
+        // the field.
+        for attempt in 0..<3 {
+            let existing = try composeText() ?? ""
+            if existing.isEmpty { break }
 
-        if !existing.isEmpty {
-            // Slack because the field's character count and the number of backspaces a
-            // contenteditable needs are not always the same thing.
             _ = tw_clear_field(Int32(existing.count + 8))
-            guard waitForSnapshot(timeout: 3.0, where: {
+            if waitForSnapshot(timeout: 3.0, where: {
                 (Self.composeContent(in: $0) ?? "x").isEmpty
-            }) != nil else {
+            }) != nil { break }
+
+            guard attempt < 2 else {
                 throw PresenceTargetError.verificationFailed(
                     expected: "", actual: (try? composeText()) ?? "<unreadable>")
             }
