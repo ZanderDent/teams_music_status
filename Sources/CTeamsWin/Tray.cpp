@@ -321,6 +321,43 @@ extern "C" int32_t tw_single_instance_acquire(const uint16_t *name)
     return GetLastError() == ERROR_ALREADY_EXISTS ? 0 : 1;
 }
 
+namespace {
+
+/// The cross-process Teams UI lock. Session-local, not Global: two users signed in to the
+/// same machine drive two different Teams instances and must not block each other.
+HANDLE ui_mutex()
+{
+    static HANDLE handle = CreateMutexW(nullptr, FALSE, L"Local\\TeamsMusicStatus.TeamsUI");
+    return handle;
+}
+
+} // namespace
+
+extern "C" int32_t tw_ui_lock(int32_t timeoutMs)
+{
+    HANDLE handle = ui_mutex();
+    if (handle == nullptr) return TW_ERR_COM;
+
+    const DWORD result = WaitForSingleObject(handle, static_cast<DWORD>(timeoutMs));
+    switch (result) {
+    case WAIT_OBJECT_0:
+        return TW_OK;
+    case WAIT_ABANDONED:
+        // The previous holder died without releasing. The lock is ours, and Teams may be
+        // mid-flyout -- the caller's recovery path deals with that, as it does for any
+        // interrupted run.
+        return TW_OK;
+    default:
+        return TW_ERR_BUSY;
+    }
+}
+
+extern "C" void tw_ui_unlock(void)
+{
+    HANDLE handle = ui_mutex();
+    if (handle != nullptr) ReleaseMutex(handle);
+}
+
 extern "C" int32_t tw_shell_open(const uint16_t *target)
 {
     if (target == nullptr) return TW_ERR_COM;

@@ -28,6 +28,29 @@ public final class TeamsWindowsTarget: PresenceTarget, @unchecked Sendable {
     /// How long to wait for Teams to react before deciding it did not.
     private let settleTimeout: TimeInterval = 4.0
 
+    /// Serialises Teams UI access within this process **and across processes**.
+    ///
+    /// `TeamsUI.exclusive` alone is not enough on Windows. The tray application and
+    /// `tmswinctl` are separate processes, so running the diagnostics CLI while the app is
+    /// syncing has one opening the flyout while the other presses Escape — and both then
+    /// report that a control "did not respond to activation", which reads as a broken
+    /// selector rather than as two programs fighting.
+    ///
+    /// The timeout is generous because the operation being waited on drives the Teams UI
+    /// and legitimately takes seconds.
+    private func exclusive<T>(_ body: () throws -> T) throws -> T {
+        try TeamsUI.exclusive {
+            let status = tw_ui_lock(25_000)
+            guard status == TW_OK else {
+                throw TeamsWindowsError(
+                    code: status,
+                    stage: "waiting for another Teams Music Status process to finish with Teams")
+            }
+            defer { tw_ui_unlock() }
+            return try body()
+        }
+    }
+
     // MARK: - Lifecycle
 
     /// Opens (or re-opens) Chromium's web content tree.
@@ -56,7 +79,7 @@ public final class TeamsWindowsTarget: PresenceTarget, @unchecked Sendable {
     }
 
     public func prepare() throws {
-        try TeamsUI.exclusive {
+        try exclusive {
             try ensureOpen()
             // A flyout left open by an interrupted run collapses the exposed tree to just
             // that dialog, which looks exactly like a dead tree until it is dismissed. The
@@ -81,7 +104,7 @@ public final class TeamsWindowsTarget: PresenceTarget, @unchecked Sendable {
     // MARK: - Reading
 
     public func readCurrentStatus() throws -> String? {
-        try TeamsUI.exclusive {
+        try exclusive {
             try ensureOpen()
             defer { _ = try? closeOurSurfaces() }
 
@@ -127,7 +150,7 @@ public final class TeamsWindowsTarget: PresenceTarget, @unchecked Sendable {
     // MARK: - Writing
 
     public func apply(status: String) throws {
-        try TeamsUI.exclusive {
+        try exclusive {
             try ensureOpen()
             defer { _ = try? closeOurSurfaces() }
 
@@ -160,7 +183,7 @@ public final class TeamsWindowsTarget: PresenceTarget, @unchecked Sendable {
     }
 
     public func clearStatus() throws {
-        try TeamsUI.exclusive {
+        try exclusive {
             try ensureOpen()
             defer { _ = try? closeOurSurfaces() }
 
@@ -224,7 +247,7 @@ public final class TeamsWindowsTarget: PresenceTarget, @unchecked Sendable {
     /// exact selector that stopped resolving rather than leaving a caller to guess from a
     /// generic "control not found".
     public func selectorReport() throws -> [(name: String, resolved: Bool, detail: String?)] {
-        try TeamsUI.exclusive {
+        try exclusive {
             try ensureOpen()
             defer { _ = try? closeOurSurfaces() }
 
@@ -250,7 +273,7 @@ public final class TeamsWindowsTarget: PresenceTarget, @unchecked Sendable {
     /// compose box is a CKEditor contenteditable, and Chromium will accept a ValuePattern
     /// write that the editor's own model never sees.
     public func probeTextEntry(_ text: String) throws -> [(method: String, readBack: String?)] {
-        try TeamsUI.exclusive {
+        try exclusive {
             try ensureOpen()
             defer { _ = try? closeOurSurfaces() }
 

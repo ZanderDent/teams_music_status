@@ -326,6 +326,23 @@ void tw_message_box(const uint16_t *title, const uint16_t *body, int32_t isError
  */
 int32_t tw_single_instance_acquire(const uint16_t *name);
 
+/*
+ * Serialises Teams UI access across *processes*.
+ *
+ * The profile flyout is one piece of global UI. An in-process lock is not enough: the tray
+ * application and the diagnostics CLI are separate processes, and running `tmswinctl gate`
+ * while the app is syncing means one opens the flyout while the other presses Escape.
+ * Both then report that the control "did not respond to activation" -- which looks like a
+ * broken selector rather than two programs fighting.
+ *
+ * Returns TW_OK when the lock is held, TW_ERR_BUSY when the timeout elapsed.
+ * Every successful lock must be matched by tw_ui_unlock.
+ */
+int32_t tw_ui_lock(int32_t timeoutMs);
+void    tw_ui_unlock(void);
+
+#define TW_ERR_BUSY 6
+
 /* Opens a path or URL with the shell -- the log folder, or the project page. */
 int32_t tw_shell_open(const uint16_t *target);
 

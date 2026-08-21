@@ -243,7 +243,22 @@ public final class WindowsPresenceCoordinator: @unchecked Sendable {
         // "observed and empty".
         var observed: String?? = nil
         if state.lastWrittenByApp != nil, interaction == .available {
-            observed = .some(try? target.readCurrentStatus())
+            do {
+                observed = .some(try target.readCurrentStatus())
+            } catch {
+                // A read that *failed* is not evidence of an empty status, and the
+                // difference is not cosmetic: `.some(nil)` means "we looked and Teams
+                // showed nothing", which against a status we just wrote is the definition
+                // of the user having taken over. The engine then latches a manual override
+                // and stops writing for good.
+                //
+                // Observed exactly that in a soak run — a read lost a race with another
+                // process, `try?` turned the error into `.some(nil)`, and syncing stopped
+                // 33 seconds after launch. Leaving `observed` nil says "we did not look",
+                // which is the truth, and the next cycle simply tries again.
+                Log.coordinator.info("could not read the current status this cycle: \(error.localizedDescription, privacy: .public)")
+                observed = nil
+            }
         }
 
         // 4. Decide.
