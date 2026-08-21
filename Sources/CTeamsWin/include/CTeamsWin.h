@@ -224,6 +224,111 @@ int32_t tw_clear_field(int32_t count);
 #define TW_VK_DELETE 0x2E
 #define TW_VK_BACK   0x08
 
+/* --- tray shell ----------------------------------------------------------- */
+
+/*
+ * The notification-area icon and its menu.
+ *
+ * A hidden window owns the icon and pumps the message loop; Swift supplies the menu and
+ * receives a command id when something is clicked. Keeping the Win32 plumbing here means
+ * the Swift side never touches a window procedure or a C function pointer with state.
+ */
+
+typedef void (*TWCommandHandler)(int32_t commandId, void *context);
+
+/* Icon states, so the tray can show at a glance whether syncing is live. */
+#define TW_ICON_IDLE     0
+#define TW_ICON_ACTIVE   1
+#define TW_ICON_PROBLEM  2
+
+/*
+ * Creates the hidden window and adds the icon. Call once, before tw_tray_run.
+ * `tooltip` is what appears on hover.
+ */
+int32_t tw_tray_init(const uint16_t *tooltip, TWCommandHandler handler, void *context);
+
+/* Replaces the whole menu. Build it fresh each time it is about to be shown. */
+void tw_tray_menu_begin(void);
+void tw_tray_menu_add(int32_t commandId, const uint16_t *label, int32_t checked, int32_t enabled);
+void tw_tray_menu_add_separator(void);
+
+/*
+ * Called just before the menu is displayed, so the caller can rebuild it with current
+ * state -- what is playing changes between right-clicks.
+ */
+void tw_tray_set_menu_builder(TWCommandHandler builder, void *context);
+
+int32_t tw_tray_set_tooltip(const uint16_t *tooltip);
+int32_t tw_tray_set_icon(int32_t state);
+
+/* A balloon notification. Used sparingly -- only for things the user must know. */
+int32_t tw_tray_notify(const uint16_t *title, const uint16_t *body);
+
+/* Runs the message loop. Returns when tw_tray_quit is called. */
+int32_t tw_tray_run(void);
+void    tw_tray_quit(void);
+
+/*
+ * Marshals a call onto the UI thread.
+ *
+ * The sync loop runs on its own thread and must not touch the tray directly: Shell_NotifyIcon
+ * from a non-UI thread is a source of intermittent, unreproducible failures.
+ */
+int32_t tw_tray_post_to_ui(int32_t commandId);
+
+/* --- settings and onboarding --------------------------------------------- */
+
+/*
+ * Renders a template so the settings window can show what Teams will actually receive.
+ *
+ * The preview is not cosmetic: profanity masking and Unicode sanitising both change the
+ * text, so a user editing a template with no preview cannot tell why their status looks
+ * different from what they typed.
+ */
+typedef void (*TWPreviewProvider)(const uint16_t *templateText,
+                                  uint16_t *out, int32_t capacity, void *context);
+
+typedef struct {
+    uint16_t templateText[TW_NAME_MAX];
+    int32_t  maskProfanity;
+    int32_t  launchAtLogin;
+    /* False when running from the build directory, where a startup entry would rot. */
+    int32_t  launchAtLoginSupported;
+    int32_t  pauseGraceSeconds;
+    int32_t  pollSeconds;
+} TWSettingsForm;
+
+/* Modal. Returns 1 when the user saved, 0 when they cancelled or closed the window. */
+int32_t tw_settings_dialog(TWSettingsForm *inout, TWPreviewProvider preview, void *context);
+
+typedef struct {
+    uint16_t teamsVersion[TW_ID_MAX];
+    uint16_t playerState[TW_NAME_MAX];
+    int32_t  teamsReady;
+    int32_t  playerReady;
+    /* Out: what the user chose. */
+    int32_t  enableSync;
+    int32_t  launchAtLogin;
+    int32_t  launchAtLoginSupported;
+} TWOnboardingForm;
+
+/* Modal. Returns 1 when the user finished setup, 0 when they closed the window. */
+int32_t tw_onboarding_dialog(TWOnboardingForm *inout);
+
+/* A modal message box. Used for errors the user has to see. */
+void tw_message_box(const uint16_t *title, const uint16_t *body, int32_t isError);
+
+/* --- windows -------------------------------------------------------------- */
+
+/*
+ * Ensures only one copy of the app is running, and returns 0 if another already holds the
+ * name. A second instance would fight the first over the same Teams status.
+ */
+int32_t tw_single_instance_acquire(const uint16_t *name);
+
+/* Opens a path or URL with the shell -- the log folder, or the project page. */
+int32_t tw_shell_open(const uint16_t *target);
+
 #ifdef __cplusplus
 } /* extern "C" */
 #endif

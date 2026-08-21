@@ -14,6 +14,7 @@
 
 #include <algorithm>
 #include <cwctype>
+#include <thread>
 #include <string>
 
 using namespace winrt;
@@ -37,16 +38,33 @@ std::wstring lowered(std::wstring_view s)
     return out;
 }
 
-/// WinRT needs an initialised apartment per thread. Multi-threaded suits a background
-/// poller; init_apartment throws if the thread already joined a different one, which is
-/// not fatal here, so it is swallowed.
-void ensure_apartment()
+/// Runs `work` on a dedicated multi-threaded-apartment thread and waits for it.
+///
+/// Not an optimisation — a correctness requirement. These calls block on a WinRT async
+/// with `.get()`, and blocking that way on a single-threaded apartment deadlocks: the STA
+/// needs to pump messages to complete the operation, and `.get()` never lets it. The tray
+/// application's main thread ends up an STA, so calling directly from it hangs the process
+/// with no error and no log line.
+///
+/// Joining a fresh MTA thread each call sidesteps the question entirely: this code no
+/// longer cares what apartment the caller happens to be in. The thread costs far less than
+/// the media-session round trip it wraps.
+template <typename Work>
+int32_t on_mta_thread(Work &&work)
 {
-    static thread_local bool done = false;
-    if (done) return;
-    try { init_apartment(apartment_type::multi_threaded); }
-    catch (...) { /* already initialised on this thread — fine */ }
-    done = true;
+    int32_t result = TW_ERR_COM;
+    std::thread worker([&] {
+        try {
+            init_apartment(apartment_type::multi_threaded);
+        } catch (...) {
+            // A fresh thread should never already be in an apartment, but if the runtime
+            // disagrees the call below is still worth attempting.
+        }
+        try { result = work(); }
+        catch (...) { result = TW_ERR_COM; }
+    });
+    worker.join();
+    return result;
 }
 
 int32_t fill(GlobalSystemMediaTransportControlsSession const &session, TWNowPlaying *out)
@@ -74,7 +92,7 @@ int32_t fill(GlobalSystemMediaTransportControlsSession const &session, TWNowPlay
 extern "C" int32_t tw_now_playing_for(const uint16_t *appIdNeedle, TWNowPlaying *out)
 {
     if (out == nullptr) return TW_ERR_COM;
-    ensure_apartment();
+    return on_mta_thread([&]() -> int32_t {
     try {
         auto manager = GlobalSystemMediaTransportControlsSessionManager::RequestAsync().get();
 
@@ -106,6 +124,7 @@ extern "C" int32_t tw_now_playing_for(const uint16_t *appIdNeedle, TWNowPlaying 
     } catch (...) {
         return TW_ERR_COM;
     }
+    });
 }
 
 extern "C" int32_t tw_now_playing(TWNowPlaying *out)

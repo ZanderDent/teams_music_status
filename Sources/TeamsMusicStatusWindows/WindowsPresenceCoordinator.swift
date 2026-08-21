@@ -24,6 +24,8 @@ public final class WindowsPresenceCoordinator: @unchecked Sendable {
         public var targetAvailability: String = "unknown"
         /// Consecutive failed cycles. Drives the backoff and the tray icon's state.
         public var consecutiveFailures = 0
+
+        public init() {}
     }
 
     private let settings: WindowsSettings

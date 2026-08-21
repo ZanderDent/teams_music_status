@@ -85,6 +85,8 @@ let package = Package(
     products: [
         .library(name: "TeamsMusicStatusCore", targets: ["TeamsMusicStatusCore"]),
         .library(name: "TeamsMusicStatusWindows", targets: ["TeamsMusicStatusWindows"]),
+        // The application: a notification-area icon, no window unless you ask for one.
+        .executable(name: "TeamsMusicStatus", targets: ["TeamsMusicStatusWin"]),
         // Diagnostics harness, mirroring `tmsctl` on macOS: drives the real product code
         // from a terminal so each layer can be verified without a GUI.
         .executable(name: "tmswinctl", targets: ["tmswinctl"]),
@@ -109,12 +111,26 @@ let package = Package(
                 .linkedLibrary("oleaut32"),
                 .linkedLibrary("user32"),
                 .linkedLibrary("version"),   // GetFileVersionInfo, for the Teams build number
+                .linkedLibrary("shell32"),   // tray icon, ShellExecute
+                .linkedLibrary("gdi32"),     // the tray icon is drawn at run time
+                .linkedLibrary("comctl32"),
             ]
         ),
         .target(
             name: "TeamsMusicStatusWindows",
             dependencies: ["TeamsMusicStatusCore", "CTeamsWin"],
             swiftSettings: [.swiftLanguageMode(.v5)]
+        ),
+        // The product: a notification-area application, no window unless you ask for one.
+        //
+        // /SUBSYSTEM:WINDOWS stops a console flashing up at launch; /ENTRY:mainCRTStartup
+        // is required with it, because Swift emits a C `main` rather than `WinMain`.
+        .executableTarget(
+            name: "TeamsMusicStatusWin",
+            dependencies: ["TeamsMusicStatusCore", "TeamsMusicStatusWindows", "CTeamsWin"],
+            swiftSettings: [.swiftLanguageMode(.v5)],
+            linkerSettings: [.unsafeFlags(["-Xlinker", "/SUBSYSTEM:WINDOWS",
+                                           "-Xlinker", "/ENTRY:mainCRTStartup"])]
         ),
         .executableTarget(
             name: "tmswinctl",
