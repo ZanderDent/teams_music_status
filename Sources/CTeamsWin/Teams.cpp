@@ -21,6 +21,7 @@
 
 #include <algorithm>
 #include <string>
+#include <mutex>
 #include <vector>
 
 namespace {
@@ -102,7 +103,10 @@ struct State {
     TeamsWindows windows;
     std::vector<winrt::com_ptr<IAccessible>> held;  // keeps the Chromium tree alive
     winrt::com_ptr<IUIAutomation> uia;
-    bool comReady = false;
+    /// Guards everything above. The sync loop drives Teams from its own thread while the
+    /// tray's UI thread reads health for the menu, and `tw_open` clears and repopulates
+    /// `held` — reading it mid-clear is a use-after-free waiting to happen.
+    std::recursive_mutex mutex;
 };
 
 State &state()
@@ -111,12 +115,19 @@ State &state()
     return s;
 }
 
+/// COM initialisation is **per thread**, not per process.
+///
+/// This was previously guarded by a single process-wide flag, so whichever thread happened
+/// to call first initialised COM and every other thread — including the one that actually
+/// drives Teams — silently never did. It appeared to work because a process with a live
+/// MTA often lets an uninitialised thread through, which is exactly the kind of "works
+/// until it doesn't" that shows up as an unexplained disappearance hours later.
 void ensure_com()
 {
-    auto &s = state();
-    if (s.comReady) return;
+    static thread_local bool done = false;
+    if (done) return;
     CoInitializeEx(nullptr, COINIT_MULTITHREADED);
-    s.comReady = true;
+    done = true;
 }
 
 // --- MSAA ----------------------------------------------------------------
@@ -268,6 +279,7 @@ void send_key(int virtualKey)
 
 extern "C" int32_t tw_open(void)
 {
+    std::lock_guard<std::recursive_mutex> guard(state().mutex);
     ensure_com();
     auto &s = state();
 
@@ -301,6 +313,7 @@ extern "C" int32_t tw_open(void)
 
 extern "C" void tw_close(void)
 {
+    std::lock_guard<std::recursive_mutex> guard(state().mutex);
     auto &s = state();
     s.held.clear();
     s.uia = nullptr;
@@ -308,6 +321,7 @@ extern "C" void tw_close(void)
 
 extern "C" int32_t tw_health(void)
 {
+    std::lock_guard<std::recursive_mutex> guard(state().mutex);
     HWND top = find_teams_window();
     if (top == nullptr) {
         // No visible TeamsWebView window. Distinguish "Teams is not running at all" from
@@ -492,6 +506,7 @@ extern "C" int32_t tw_park_focus(void)
 
 extern "C" int32_t tw_snapshot(TWNode *out, int32_t capacity, int32_t *count)
 {
+    std::lock_guard<std::recursive_mutex> guard(state().mutex);
     if (out == nullptr || count == nullptr || capacity <= 0) return TW_ERR_COM;
     *count = 0;
 
@@ -564,6 +579,7 @@ extern "C" int32_t tw_snapshot(TWNode *out, int32_t capacity, int32_t *count)
 
 extern "C" int32_t tw_msaa_press(const uint16_t *namePrefix)
 {
+    std::lock_guard<std::recursive_mutex> guard(state().mutex);
     if (namePrefix == nullptr) return TW_ERR_COM;
     auto &s = state();
     if (s.held.empty()) return TW_ERR_TREE_UNAVAIL;
@@ -585,6 +601,7 @@ extern "C" int32_t tw_msaa_press(const uint16_t *namePrefix)
 
 extern "C" int32_t tw_set_value(const uint16_t *automationId, const uint16_t *text)
 {
+    std::lock_guard<std::recursive_mutex> guard(state().mutex);
     if (automationId == nullptr || text == nullptr) return TW_ERR_COM;
     auto &s = state();
     if (!s.uia || s.windows.top == nullptr) return TW_ERR_TREE_UNAVAIL;
@@ -622,6 +639,7 @@ extern "C" int32_t tw_set_value(const uint16_t *automationId, const uint16_t *te
 
 extern "C" int32_t tw_type_text(const uint16_t *text)
 {
+    std::lock_guard<std::recursive_mutex> guard(state().mutex);
     if (text == nullptr) return TW_ERR_COM;
     auto &s = state();
     if (s.windows.inputTargets.empty()) return TW_ERR_NO_TEAMS;
@@ -635,6 +653,7 @@ extern "C" int32_t tw_type_text(const uint16_t *text)
 
 extern "C" int32_t tw_clear_field(int32_t count)
 {
+    std::lock_guard<std::recursive_mutex> guard(state().mutex);
     auto &s = state();
     if (s.windows.inputTargets.empty()) return TW_ERR_NO_TEAMS;
     if (count < 0) return TW_ERR_COM;
@@ -649,6 +668,7 @@ extern "C" int32_t tw_clear_field(int32_t count)
 
 extern "C" int32_t tw_post_key(int32_t virtualKey)
 {
+    std::lock_guard<std::recursive_mutex> guard(state().mutex);
     if (state().windows.inputTargets.empty()) return TW_ERR_NO_TEAMS;
     send_key(virtualKey);
     return TW_OK;

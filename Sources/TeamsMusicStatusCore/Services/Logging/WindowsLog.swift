@@ -120,7 +120,11 @@ final class LogSink: @unchecked Sendable {
             FileHandle.standardError.write(Data(line.utf8))
         }
 
-        queue.async { [currentFile] in
+        // Synchronous, deliberately. An async write is lost if the process exits before the
+        // queue drains — which means the one log line that matters most, the last one
+        // before an unexplained exit, is precisely the one that never reaches disk. This
+        // logs a handful of lines a minute, so serialising them costs nothing worth having.
+        queue.sync { [currentFile] in
             guard let data = line.data(using: .utf8) else { return }
             if let handle = try? FileHandle(forWritingTo: currentFile) {
                 defer { try? handle.close() }

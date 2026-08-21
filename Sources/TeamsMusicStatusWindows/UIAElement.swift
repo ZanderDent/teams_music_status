@@ -98,16 +98,24 @@ public struct UIASnapshot: Sendable {
     public init(elements: [UIAElement]) { self.elements = elements }
 
     /// Takes a snapshot of the live Teams tree.
+    ///
+    /// The buffer is allocated raw rather than as `[TWNode](repeating:count:)`. Each node
+    /// is ~2.6 KB, so the array form zero-fills two megabytes on every call — and this is
+    /// called on a poll loop while waiting for Teams to settle, tens of times per write.
+    /// The shim fills every field of the rows it writes and reports how many, so
+    /// pre-zeroing buys nothing.
     public static func capture() throws -> UIASnapshot {
-        var buffer = [TWNode](repeating: TWNode(), count: capacity)
-        var count: Int32 = 0
+        let buffer = UnsafeMutablePointer<TWNode>.allocate(capacity: capacity)
+        defer { buffer.deallocate() }
 
-        let status = buffer.withUnsafeMutableBufferPointer { buf in
-            tw_snapshot(buf.baseAddress, Int32(capacity), &count)
-        }
+        var count: Int32 = 0
+        let status = tw_snapshot(buffer, Int32(capacity), &count)
         guard status == TW_OK else { throw TeamsWindowsError(code: status, stage: "snapshot") }
 
-        return UIASnapshot(elements: buffer.prefix(Int(count)).map(UIAElement.init))
+        var elements: [UIAElement] = []
+        elements.reserveCapacity(Int(count))
+        for index in 0..<Int(count) { elements.append(UIAElement(buffer[index])) }
+        return UIASnapshot(elements: elements)
     }
 
     /// The first element matching `selector`, or nil.
