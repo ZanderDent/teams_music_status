@@ -136,7 +136,12 @@ final class TrayApp {
         // A disabled first line, showing what the app currently believes. This is the
         // whole diagnostic surface for a user who never opens a terminal.
         let headline: String
-        if status.manualOverride {
+        if status.selectorsBroken != nil {
+            // Deliberately blunt. This state needs an app update to clear, so telling the
+            // user syncing is merely "having trouble" would leave them waiting for a
+            // recovery that is not coming.
+            headline = "Paused — this Teams version changed its interface"
+        } else if status.manualOverride {
             headline = "Paused — you changed your status in Teams"
         } else if let error = status.lastError {
             headline = "Problem: \(error)"

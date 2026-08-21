@@ -24,6 +24,9 @@ public final class WindowsPresenceCoordinator: @unchecked Sendable {
         public var targetAvailability: String = "unknown"
         /// Consecutive failed cycles. Drives the backoff and the tray icon's state.
         public var consecutiveFailures = 0
+        /// Set when a Teams update moved the UI out from under `TeamsSelectors`. Latches:
+        /// automation stays off until a Teams build passes the self-test again.
+        public var selectorsBroken: String?
 
         public init() {}
     }
@@ -150,11 +153,67 @@ public final class WindowsPresenceCoordinator: @unchecked Sendable {
         return shouldStop
     }
 
+    /// Confirms the Teams UI still matches `TeamsSelectors` after a Teams update.
+    ///
+    /// Teams updates itself silently, and an update can move the controls this app
+    /// navigates by. Thrashing against a UI it no longer recognises would open and close
+    /// the user's flyout every few seconds forever, so a failure **disables automation and
+    /// says which selector stopped resolving** — the same choice the macOS implementation
+    /// makes, and the reason `TeamsSelectors` records what it was looking for.
+    ///
+    /// Only run when the installed build differs from the last one that passed: the test
+    /// opens the flyout and the editor, which is far too expensive for every launch.
+    private func verifySelectorsIfNeeded() {
+        guard let installed = TeamsWindowsHealth.teamsVersion() else { return }
+        guard installed != settings.lastVerifiedTeamsVersion else { return }
+
+        Log.selfTest.info("Teams is \(installed, privacy: .public); last verified was \(settings.lastVerifiedTeamsVersion ?? "never", privacy: .public)")
+
+        do {
+            let report = try target.selectorReport()
+
+            // `statusReadout`, `editStatusButton`, `deleteStatusButton` and `setStatusItem`
+            // are mutually exclusive by design — Teams shows one set or the other depending
+            // on whether a status is already set — so the test is that the flyout resolved
+            // and that *some* way into the editor exists.
+            let dialogResolved = report.contains { $0.name == "profileDialog" && $0.resolved }
+            let entryResolved = report.contains {
+                ["statusReadout", "editStatusButton", "setStatusItem"].contains($0.name) && $0.resolved
+            }
+
+            guard dialogResolved, entryResolved else {
+                let missing = report.filter { !$0.resolved }.map(\.name).joined(separator: ", ")
+                Log.selfTest.error("selectors did not resolve on Teams \(installed, privacy: .public): \(missing, privacy: .public)")
+                mutate {
+                    $0.selectorsBroken = "Teams \(installed) changed its interface (\(missing)). "
+                                       + "Syncing is paused until this app is updated."
+                }
+                return
+            }
+
+            settings.lastVerifiedTeamsVersion = installed
+            mutate { $0.selectorsBroken = nil }
+            Log.selfTest.info("selectors verified against Teams \(installed, privacy: .public)")
+        } catch {
+            // Could not run the test at all — Teams busy, tree not up. Not evidence the
+            // selectors are broken, so nothing is latched and it is retried next cycle.
+            Log.selfTest.info("self-test could not run: \(error.localizedDescription, privacy: .public)")
+        }
+    }
+
     private func cycle() {
         // Configuration can change under us while the loop runs — the user editing the
         // template in Settings is the normal case — so it is re-read every tick rather
         // than captured at start.
         engine.configuration = settings.syncConfiguration
+
+        // Stop before touching Teams if a Teams update moved the UI. Latched, so this
+        // costs one comparison per cycle once it has happened.
+        if currentStatus.selectorsBroken == nil { verifySelectorsIfNeeded() }
+        if let broken = currentStatus.selectorsBroken {
+            mutate { $0.targetAvailability = "paused — Teams changed" ; $0.lastError = broken }
+            return
+        }
 
         // 1. What is playing?
         let presence: TrackPresence?

@@ -30,6 +30,7 @@ public final class WindowsSettings: @unchecked Sendable {
         var hasCompletedOnboarding: Bool?
         var maskProfanity: Bool?
         var launchAtLogin: Bool?
+        var lastVerifiedTeamsVersion: String?
     }
 
     private let fileURL: URL
@@ -138,6 +139,17 @@ public final class WindowsSettings: @unchecked Sendable {
     public var launchAtLogin: Bool {
         get { read { $0.launchAtLogin ?? false } }
         set { write { $0.launchAtLogin = newValue } }
+    }
+
+    /// The Teams build whose UI was last confirmed to match `TeamsSelectors`.
+    ///
+    /// Teams updates itself silently and can move the controls this app navigates by. The
+    /// self-test is expensive — it opens the flyout and the editor — so it runs when this
+    /// stops matching the installed build rather than on every launch. That is the same
+    /// trade `TeamsVersionTracker` makes on macOS.
+    public var lastVerifiedTeamsVersion: String? {
+        get { read { $0.lastVerifiedTeamsVersion } }
+        set { write { $0.lastVerifiedTeamsVersion = newValue } }
     }
 
     public var syncConfiguration: SyncEngine.Configuration {
