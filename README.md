@@ -303,9 +303,11 @@ the core.
   player or another computer is invisible to it, and it reports the primary artist only.
   The optional Web API source sees everything, but Spotify will only serve it to five
   hand-allowlisted accounts — see [Choosing a music source](#choosing-a-music-source).
-* **macOS only.** A Windows port would need a different automation backend, and
-  background updates without focus theft may not be achievable there — see
-  `docs/FEASIBILITY.md` §13.
+* **The Windows build has no application yet.** The Teams automation and the Spotify
+  source both work on Windows and pass the acceptance gate, including background updates
+  without focus theft — which `docs/FEASIBILITY.md` §13 warned might not be achievable
+  there. What is missing is everything around them: there is no tray application, only the
+  `tmswinctl` diagnostics CLI. See [`docs/WINDOWS.md`](docs/WINDOWS.md).
 * **"Show when people message me" cannot be set reliably.** Teams exposes the checkbox
   but not its checked state (`AXValue` is always empty), so the app refuses to toggle it
   blind rather than risk turning your setting off. Tick it once in Teams by hand.

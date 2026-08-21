@@ -48,6 +48,42 @@ jobs:
         # docs/ACCEPTANCE_TESTS.md and are run by hand before release.
         run: swift test
 
+  build-and-test-windows:
+    name: Build and test (Windows)
+    runs-on: windows-latest
+    timeout-minutes: 40
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install the Swift toolchain
+        shell: pwsh
+        # Installed straight from swift.org rather than through a third-party action, for
+        # the same reason Xcode is selected by hand above. The version is pinned because
+        # the installer URL contains it; bump it deliberately.
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $version = '6.0.3'
+          $url = "https://download.swift.org/swift-$version-release/windows10/swift-$version-RELEASE/swift-$version-RELEASE-windows10.exe"
+          $exe = "$env:RUNNER_TEMP\swift-installer.exe"
+          Invoke-WebRequest -Uri $url -OutFile $exe
+          Start-Process -FilePath $exe -ArgumentList '/quiet','/norestart' -Wait
+          echo "$env:LOCALAPPDATA\Programs\Swift\Toolchains\$version+Asserts\usr\bin" >> $env:GITHUB_PATH
+          echo "$env:LOCALAPPDATA\Programs\Swift\Runtimes\$version\usr\bin" >> $env:GITHUB_PATH
+
+      - name: Build and test
+        shell: cmd
+        # vcvars64 replaces the whole environment block, which drops the Swift installer's
+        # SDKROOT. Without it swiftc cannot find the Windows stdlib and fails with
+        # "unable to load standard library for target x86_64-unknown-windows-msvc", which
+        # does not obviously point at the cause. See docs/WINDOWS.md §10.
+        run: |
+          call "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Auxiliary\Build\vcvars64.bat"
+          set SDKROOT=%LOCALAPPDATA%\Programs\Swift\Platforms\6.0.3\Windows.platform\Developer\SDKs\Windows.sdk
+          swift --version || exit /b 1
+          swift build --build-tests || exit /b 1
+          swift test || exit /b 1
+
   package:
     name: Unsigned release artifact
     runs-on: macos-15
@@ -159,5 +195,31 @@ jobs:
           if git grep -nE 'kAXPositionAttribute|kAXFrameAttribute|kAXSizeAttribute' \
                -- Sources/TeamsMusicStatusCore/Targets ; then
             echo "::error::the Teams automation must not read screen geometry"
+            exit 1
+          fi
+
+          # The same rule on Windows. BoundingRectangle and GetClickablePoint are the UI
+          # Automation routes to geometry; SendInput and the mouse_event family are global
+          # and coordinate-based, so they would also break the no-focus-theft rule.
+          if git grep -nE 'BoundingRectangle|GetClickablePoint|SendInput|SetCursorPos|mouse_event|WM_LBUTTONDOWN' \
+               -- Sources/CTeamsWin Sources/TeamsMusicStatusWindows ; then
+            echo "::error::the Windows Teams automation must not use screen geometry or global input"
+            exit 1
+          fi
+
+      - name: Windows automation must not activate Teams
+        # UIA SetFocus and ExpandCollapsePattern.Expand both pull Teams to the foreground,
+        # and SW_RESTORE activates where SW_SHOWNOACTIVATE does not. All three work, which
+        # is exactly why they need guarding against: the failure is a rude app, not a
+        # broken build. tw_park_focus is test-only scaffolding and lives in CTeamsWin.
+        run: |
+          set -euo pipefail
+          # Comments are excluded: the reason these are forbidden is documented right next
+          # to the code that avoids them, and a check that fires on its own rationale is
+          # one people learn to ignore.
+          if git grep -nE 'SetFocus|ExpandCollapsePattern|SW_RESTORE' \
+               -- Sources/TeamsMusicStatusWindows \
+               | grep -vE ':[0-9]+:[[:space:]]*(///|//|\*)' ; then
+            echo "::error::this activates Teams; use MSAA accDoDefaultAction and SW_SHOWNOACTIVATE"
             exit 1
           fi

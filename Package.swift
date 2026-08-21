@@ -107,6 +107,7 @@ let package = Package(
                 .linkedLibrary("ole32"),
                 .linkedLibrary("oleaut32"),
                 .linkedLibrary("user32"),
+                .linkedLibrary("version"),   // GetFileVersionInfo, for the Teams build number
             ]
         ),
         .target(

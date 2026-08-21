@@ -19,6 +19,8 @@ func usage() -> Never {
       teams-set <text>       write and commit a status message
       teams-clear            remove the status message
       sync-once [template]   read what is playing, render it, publish it, verify
+      gate                   Hard Gate 0 acceptance matrix (writes and restores status)
+      health                 Teams version, health state, frontmost window
       version
 
     Default template: \(StatusTemplate.defaultTemplate)
@@ -189,8 +191,20 @@ case "sync-once":
         exit(1)
     }
 
+case "gate":
+    // Hard Gate 0. Required by CONTRIBUTING.md before opening a pull request that touches
+    // the Teams automation. Writes and restores the user's status; exits non-zero if any
+    // case fails or if anything stole the foreground.
+    GateRunner(target: TeamsWindowsTarget()).run(arguments: arguments)
+
+case "health":
+    print("teams version : \(TeamsWindowsHealth.teamsVersion() ?? "unknown")")
+    print("health        : \(TeamsWindowsHealth.current().explanation)")
+    print("frontmost     : \(WindowsFocus.frontmostTitle())")
+
 case "version":
     print("tmswinctl (Teams Music Status, Windows)")
+    print("teams   : \(TeamsWindowsHealth.teamsVersion() ?? "unknown")")
 
 default:
     usage()

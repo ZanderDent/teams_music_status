@@ -15,6 +15,7 @@
 #include <windows.h>
 #include <oleacc.h>
 #include <uiautomation.h>
+#include <tlhelp32.h>
 
 #include <winrt/base.h>
 
@@ -76,6 +77,23 @@ TeamsWindows discover()
     w.top = find_teams_window();
     if (w.top) collect(w.top, w);
     return w;
+}
+
+// Distinguishes "Teams is not running" from "Teams is running with no visible window",
+// which are different health states with different repairs: only the second is
+// recoverable without launching anything.
+bool teams_process_running()
+{
+    winrt::handle snapshot{CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0)};
+    if (!snapshot) return false;
+
+    PROCESSENTRY32W entry{};
+    entry.dwSize = sizeof(entry);
+    if (!Process32FirstW(snapshot.get(), &entry)) return false;
+    do {
+        if (_wcsicmp(entry.szExeFile, L"ms-teams.exe") == 0) return true;
+    } while (Process32NextW(snapshot.get(), &entry));
+    return false;
 }
 
 // --- process-wide state --------------------------------------------------
@@ -286,6 +304,119 @@ extern "C" void tw_close(void)
     auto &s = state();
     s.held.clear();
     s.uia = nullptr;
+}
+
+extern "C" int32_t tw_health(void)
+{
+    HWND top = find_teams_window();
+    if (top == nullptr) {
+        // No visible TeamsWebView window. Distinguish "Teams is not running at all" from
+        // "Teams is running with its window closed to the tray", because only the second
+        // is recoverable without launching anything.
+        return teams_process_running() ? TW_HEALTH_NO_WINDOW : TW_HEALTH_NOT_RUNNING;
+    }
+    if (IsIconic(top)) return TW_HEALTH_MINIMIZED;
+
+    auto &s = state();
+    if (s.held.empty() || !s.uia) return TW_HEALTH_TREE_UNAVAIL;
+    return TW_HEALTH_OK;
+}
+
+extern "C" int32_t tw_window_restore(void)
+{
+    HWND top = find_teams_window();
+    if (top == nullptr) return TW_ERR_NO_TEAMS;
+
+    // SW_SHOWNOACTIVATE, never SW_RESTORE: the latter activates, and activation is the one
+    // thing this product must never do.
+    ShowWindow(top, SW_SHOWNOACTIVATE);
+
+    // Ordering the window in without activating it. A minimised Chromium window is treated
+    // as occluded and discards interactions even once the tree reads healthy again, which
+    // is why this is not merely cosmetic.
+    SetWindowPos(top, HWND_TOP, 0, 0, 0, 0,
+                 SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_SHOWWINDOW);
+    return TW_OK;
+}
+
+extern "C" int32_t tw_window_minimize(void)
+{
+    HWND top = find_teams_window();
+    if (top == nullptr) return TW_ERR_NO_TEAMS;
+    ShowWindow(top, SW_MINIMIZE);
+    return TW_OK;
+}
+
+extern "C" int32_t tw_teams_version(uint16_t *out, int32_t capacity)
+{
+    if (out == nullptr || capacity <= 0) return TW_ERR_COM;
+    out[0] = 0;
+
+    HWND top = find_teams_window();
+    if (top == nullptr) return TW_ERR_NO_TEAMS;
+
+    DWORD pid = 0;
+    GetWindowThreadProcessId(top, &pid);
+    if (pid == 0) return TW_ERR_NO_TEAMS;
+
+    winrt::handle process{OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pid)};
+    if (!process) return TW_ERR_NO_TEAMS;
+
+    wchar_t path[MAX_PATH] = {};
+    DWORD size = MAX_PATH;
+    if (!QueryFullProcessImageNameW(process.get(), 0, path, &size)) return TW_ERR_NO_TEAMS;
+
+    DWORD unused = 0;
+    const DWORD infoSize = GetFileVersionInfoSizeW(path, &unused);
+    if (infoSize == 0) return TW_ERR_NOT_FOUND;
+
+    std::vector<uint8_t> buffer(infoSize);
+    if (!GetFileVersionInfoW(path, 0, infoSize, buffer.data())) return TW_ERR_NOT_FOUND;
+
+    VS_FIXEDFILEINFO *fixed = nullptr;
+    UINT fixedLength = 0;
+    if (!VerQueryValueW(buffer.data(), L"\\", reinterpret_cast<LPVOID *>(&fixed), &fixedLength) || fixed == nullptr)
+        return TW_ERR_NOT_FOUND;
+
+    wchar_t rendered[64] = {};
+    swprintf(rendered, 64, L"%u.%u.%u.%u",
+             HIWORD(fixed->dwFileVersionMS), LOWORD(fixed->dwFileVersionMS),
+             HIWORD(fixed->dwFileVersionLS), LOWORD(fixed->dwFileVersionLS));
+    copy_out(out, static_cast<size_t>(capacity), rendered);
+    return TW_OK;
+}
+
+extern "C" int32_t tw_foreground_title(uint16_t *out, int32_t capacity)
+{
+    if (out == nullptr || capacity <= 0) return TW_ERR_COM;
+    out[0] = 0;
+
+    HWND fore = GetForegroundWindow();
+    if (fore == nullptr) return TW_ERR_NOT_FOUND;
+
+    wchar_t title[512] = {};
+    GetWindowTextW(fore, title, 512);
+    copy_out(out, static_cast<size_t>(capacity), title);
+    return TW_OK;
+}
+
+extern "C" int32_t tw_park_focus(void)
+{
+    HWND console = GetConsoleWindow();
+    if (console == nullptr) return TW_ERR_NOT_FOUND;
+
+    // SetForegroundWindow is refused for a process that is not already foreground, unless
+    // its input queue is attached to the current foreground thread first.
+    HWND fore = GetForegroundWindow();
+    const DWORD foreThread = GetWindowThreadProcessId(fore, nullptr);
+    const DWORD self = GetCurrentThreadId();
+
+    AttachThreadInput(self, foreThread, TRUE);
+    ShowWindow(console, SW_SHOWNORMAL);
+    const BOOL ok = SetForegroundWindow(console);
+    AttachThreadInput(self, foreThread, FALSE);
+
+    return ok ? TW_OK : TW_ERR_NOT_FOUND;
 }
 
 extern "C" int32_t tw_snapshot(TWNode *out, int32_t capacity, int32_t *count)

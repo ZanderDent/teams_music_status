@@ -36,7 +36,23 @@ public final class TeamsWindowsTarget: PresenceTarget, @unchecked Sendable {
     /// reading, so this is called before every operation rather than once at startup.
     private func ensureOpen() throws {
         let status = tw_open()
-        guard status == TW_OK else { throw TeamsWindowsError(code: status, stage: "opening the Teams accessibility tree") }
+        guard status == TW_OK else {
+            // Opening failed, so escalate through the health model rather than giving up:
+            // a minimised window or a flyout left open by an interrupted run both present
+            // here, and both are repairable without disturbing the user.
+            _ = try TeamsWindowsHealth.ensureHealthy()
+            let retry = tw_open()
+            guard retry == TW_OK else {
+                throw TeamsWindowsError(code: retry, stage: "opening the Teams accessibility tree")
+            }
+            return
+        }
+        // Open succeeded, but a minimised window still reads as healthy while Chromium
+        // treats it as occluded and discards every interaction. Repair that before acting.
+        if TeamsWindowsHealth.current() == .minimized {
+            _ = try TeamsWindowsHealth.ensureHealthy()
+            _ = tw_open()
+        }
     }
 
     public func prepare() throws {
@@ -50,12 +66,15 @@ public final class TeamsWindowsTarget: PresenceTarget, @unchecked Sendable {
     }
 
     public func availability() -> TargetAvailability {
-        let status = tw_open()
-        switch status {
-        case TW_OK: return .ready
-        case TW_ERR_NO_TEAMS: return .appNotRunning
-        case TW_ERR_TREE_UNAVAIL: return .needsRecovery("Teams has not published its accessibility tree.")
-        default: return .needsRecovery("Windows accessibility error \(status).")
+        _ = tw_open()
+        switch TeamsWindowsHealth.current() {
+        case .healthy: return .ready
+        case .notRunning: return .appNotRunning
+        case .noWindow, .minimized, .treeUnavailable:
+            let health = TeamsWindowsHealth.current()
+            // Repairable states are reported as recoverable rather than as failures: the
+            // coordinator retries those instead of standing down.
+            return health.isRepairable ? .needsRecovery(health.explanation) : .appNotRunning
         }
     }
 

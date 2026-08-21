@@ -58,6 +58,57 @@ int32_t tw_now_playing(TWNowPlaying *out);
  */
 int32_t tw_now_playing_for(const uint16_t *appIdNeedle, TWNowPlaying *out);
 
+/* --- window health and repair -------------------------------------------- */
+
+/*
+ * The states Teams can be in, in the order the repair loop escalates through them.
+ * Mirrors the macOS health model in TeamsAccessibility.
+ */
+#define TW_HEALTH_OK            0
+#define TW_HEALTH_NOT_RUNNING   1
+#define TW_HEALTH_NO_WINDOW     2
+#define TW_HEALTH_MINIMIZED     3
+#define TW_HEALTH_TREE_UNAVAIL  4
+
+int32_t tw_health(void);
+
+/*
+ * Un-minimises and orders the Teams window in *without* activating it.
+ *
+ * SW_RESTORE would activate, which the product may not do. SW_SHOWNOACTIVATE restores a
+ * minimised window and leaves the foreground alone. This matters beyond politeness: a
+ * minimised Chromium window is treated as occluded and silently discards interactions, so
+ * the window has to come back before anything else will work -- the same reason the macOS
+ * implementation follows un-minimising with AXRaise.
+ */
+int32_t tw_window_restore(void);
+
+/*
+ * Minimises the Teams window. Used only by the acceptance gate, to *create* the state
+ * that tw_window_restore then has to recover from. The product never calls this.
+ */
+int32_t tw_window_minimize(void);
+
+/* The installed Teams build, e.g. "26213.1006.5014.9784". Empty if it cannot be read. */
+int32_t tw_teams_version(uint16_t *out, int32_t capacity);
+
+/*
+ * The title of the window that currently has the foreground.
+ *
+ * Instrumentation for the acceptance gate, which has to *prove* the frontmost window is
+ * unchanged across every interaction. The product itself never needs this.
+ */
+int32_t tw_foreground_title(uint16_t *out, int32_t capacity);
+
+/*
+ * Brings this process's own console window to the foreground.
+ *
+ * Test scaffolding, and the only place in this file that deliberately changes activation.
+ * A "focus was preserved" assertion is worthless if Teams already had the foreground when
+ * the case started, so the gate parks focus somewhere that is definitely not Teams first.
+ */
+int32_t tw_park_focus(void);
+
 /* --- the Teams accessibility tree ---------------------------------------- */
 
 #define TW_NAME_MAX  512
