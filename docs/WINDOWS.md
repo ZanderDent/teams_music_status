@@ -205,16 +205,28 @@ platforms.
 ```
 Sources/
   TeamsMusicStatusCore/          shared; on Windows, the portable subset only
-    Core/AccessibleElement.swift   Windows-only: AccessibleElement, AXSelector, AXPoll
-  CTeamsWin/                     C ABI over UIA, MSAA and the WinRT media session
+    Core/AccessibleElement.swift        Windows-only: AccessibleElement, AXSelector, AXPoll
+    Services/Logging/WindowsLog.swift   Windows-only: Log, Redact
+  CTeamsWin/                     C ABI over UIA, MSAA, WinRT and Win32
     Media.cpp                      GlobalSystemMediaTransportControlsSession
     Teams.cpp                      tree, activation, key delivery, window health
+    Tray.cpp                       notification-area icon, menu, message loop
+    Dialogs.cpp                    settings and onboarding windows
   TeamsMusicStatusWindows/
-    UIAElement.swift               UIA snapshot presented in AX vocabulary
-    TeamsWindowsTarget.swift       PresenceTarget
-    TeamsWindowsHealth.swift       health model, repair, focus instrumentation
-    WindowsMediaSource.swift       PresenceSource
+    UIAElement.swift                    UIA snapshot presented in AX vocabulary
+    TeamsWindowsTarget.swift            PresenceTarget
+    TeamsWindowsHealth.swift            health model, repair, focus instrumentation
+    WindowsMediaSource.swift            PresenceSource
+    WindowsSettings.swift               preferences, JSON under %APPDATA%
+    WindowsLoginItem.swift              launch at login, HKCU Run key
+    WindowsPresenceCoordinator.swift    the sync loop
+  TeamsMusicStatusWin/           the application — tray icon, menu, onboarding
   tmswinctl/                     diagnostics harness, mirroring tmsctl
+
+scripts/
+  build-windows.ps1              release build + staged self-contained folder
+  release-windows.ps1            versioned zip, checksum, optional signing
+  windows-install/               Install.ps1 and Uninstall.ps1, shipped in the zip
 ```
 
 `Package.swift` gains a `#if os(Windows)` branch; the macOS manifest is preserved verbatim.
@@ -293,6 +305,50 @@ macOS implementation hit, where `AXRaise` turned out to be required after cleari
 
 ---
 
+## 9a. The application
+
+A notification-area icon, no window unless you ask for one — the same shape as the macOS
+menu-bar app. Four Apple frameworks had to be replaced outright:
+
+| macOS | Windows |
+|---|---|
+| `os_log` | `WindowsLog` — a rotating file under `%LOCALAPPDATA%`, keeping `os_log`'s **private-by-default** interpolation so the secrets rule stays enforceable in shared code |
+| `UserDefaults` + Combine | `WindowsSettings` — JSON under `%APPDATA%`, written atomically |
+| `SMAppService` | `WindowsLoginItem` — the `HKCU` Run key |
+| `PresenceCoordinator` (`NSWorkspace`) | `WindowsPresenceCoordinator` |
+
+The rules did **not** need replacing. `SyncEngine` is shared and unit tested, so debounce,
+pause grace, manual-override detection and save/restore behave identically on both
+platforms; the coordinator only gathers inputs and carries out answers.
+
+Three Win32 details are load-bearing, and each was found by something failing rather than
+by reading a document:
+
+**WinRT deadlocks on a single-threaded apartment.** The media session is read with a
+blocking `.get()`, which requires an MTA. The tray application's main thread ends up an
+STA, so the first build hung on launch with no window, no error, and no log line past
+`starting` — the worst kind of failure to diagnose. Every media read now runs on a
+dedicated MTA thread and joins, so the code no longer cares what apartment the caller is
+in. `tmswinctl` never hit this, because its main thread was never made an STA. A CLI
+passing is not evidence a GUI will.
+
+**Onboarding claimed Teams was not running while it plainly was.** The health model reports
+`treeUnavailable` until something opens the accessibility tree, which is not the same as
+Teams being absent.
+
+**Explorer can restart and take every tray icon with it.** It broadcasts `TaskbarCreated`
+afterwards; an application that ignores it keeps running with no icon and no way to reach
+it, which a user reads as a crash.
+
+The icon is drawn at run time with GDI rather than loaded from a resource — SwiftPM cannot
+compile a `.rc` file, and drawing it keeps the executable self-contained. Colour carries
+state: muted when off, Teams purple when syncing, red when something needs attention.
+
+Onboarding reports what was detected *before* asking for anything, and closing it without
+finishing deliberately does not mark it complete — so it is offered again rather than
+leaving the app in a state the user never agreed to. ("Set up later" meaning "never" was a
+real bug on macOS.)
+
 ## 10. Building and testing
 
 ```powershell
@@ -330,7 +386,38 @@ minimises Teams to exercise recovery, restores the original status, and **exits 
 any case fails or if anything stole the foreground**.
 
 `tmswinctl teams-try-text` exercises the whole text-entry path but never presses **Done**,
-so the write path can be developed without touching a published status.
+so the write path can be developed without touching a published status. `tmswinctl run`
+runs the real sync loop in a terminal — exactly what the tray application runs.
+
+### Packaging
+
+```powershell
+.\scripts\release-windows.ps1                                  # unsigned
+.\scripts\release-windows.ps1 -CertificateThumbprint <sha1>    # signed
+```
+
+Produces `dist\Teams-Music-Status-<version>-win-<arch>.zip` (~22 MB) containing the two
+executables, the Swift runtime, and `Install.ps1` / `Uninstall.ps1`.
+
+> **The Swift runtime has to ship with the app.** `--static-swift-stdlib` is accepted on
+> Windows and silently does nothing — the binary still imports `swiftCore.dll`. The build
+> walks the actual import graph and copies only what is reachable, which is 15 DLLs and
+> 55 MB rather than the full 61 MB. `_FoundationICU.dll` alone is 36 MB of that; it is the
+> price of using Foundation.
+
+Installing is per-user and needs no administrator rights: the app goes to
+`%LOCALAPPDATA%\Programs`, with a Start Menu shortcut and an Installed Apps entry so it can
+be removed the ordinary way. A machine-wide install would need elevation and would put one
+person's music on a shared machine.
+
+**The uninstaller closes the app rather than killing it**, and waits. The shutdown path is
+what restores the status the user had before syncing, and a force-kill skips it — stranding
+whatever track happened to be showing. If the wait times out it says so, rather than
+claiming a restore that did not happen.
+
+Builds are unsigned unless a certificate thumbprint is passed, matching the macOS policy
+that signing material stays off the repository and releases are signed on the maintainer's
+machine. Unsigned means SmartScreen warns on first run.
 
 ---
 
@@ -356,26 +443,31 @@ status readout, and a status was set.
 
 ## 12. What is not done yet
 
-Honest scope. The automation and the presence source are complete; the surrounding
-application is not.
+Honest scope. The app is usable end to end — onboarding, tray, settings, syncing, install
+and uninstall — and these are the gaps.
 
-* **No GUI.** There is no tray application — `tmswinctl` is the only entry point. The macOS
-  SwiftUI shell has no Windows counterpart and needs a Win32 one.
-* **No `PresenceCoordinator`.** Polling, debounce and lifecycle are macOS-only because the
-  coordinator uses `NSWorkspace` for Teams launch/quit observation. `SyncEngine` itself is
-  shared and tested, so this is plumbing rather than design.
-* **`AppSettings` and `AppEnvironment` are not ported** — both depend on Combine, which is
-  Apple-only.
 * **No Spotify Web API source.** `SpotifyWebAPISource` is pure Foundation and would port,
-  but it depends on `SpotifyAuth` (CryptoKit, AppKit) and `Log` (os). The local media
-  session source works today and needs no sign-in.
-* **No credential storage.** Keychain has no equivalent yet; Windows Credential Manager is
-  the intended replacement, and is only needed once the Web API source lands.
-* **No login item**, no installer, no signing.
+  but it depends on `SpotifyAuth` (CryptoKit, AppKit) and `LoopbackCallbackServer`
+  (Network.framework). The local media-session source works today, needs no sign-in, and is
+  *better* than its macOS counterpart. This matters less than it sounds: as the README
+  notes, Spotify serves the Web API to five hand-allowlisted accounts, so it was never the
+  path most users take.
+* **No credential storage.** Windows Credential Manager is the intended replacement for
+  Keychain, and is only needed once the Web API source lands. Nothing today handles a
+  secret, which is why the "no token reaches a log" rule has nothing to guard yet.
+* **Not code-signed.** No Authenticode certificate, so SmartScreen warns on first run.
+  `release-windows.ps1` signs everything when given a thumbprint.
+* **No `AppEnvironment` equivalent.** The tray application wires its own dependencies; there
+  is no shared composition root between the two platforms.
 * **Gate cases 4 and 5 from `ACCEPTANCE_TESTS.md`** — Teams window closed, and Teams quit
-  and relaunched — are **not** implemented on Windows. Both are treated as unrecoverable
-  (`noWindow`, `notRunning`) rather than repaired, because relaunching Teams is a visible
-  action this app should not take unasked.
+  and relaunched — are **not** implemented. Both are treated as unrecoverable (`noWindow`,
+  `notRunning`) rather than repaired, because relaunching Teams is a visible action this app
+  should not take unasked.
+* **The Windows CI job has not run on a hosted runner.** The Swift version is pinned in an
+  installer URL and the vcvars path assumes VS Enterprise on `windows-latest`; both may need
+  adjusting on first run.
+* **`PresenceSourceKind.spotifyLocal.summary` still reads "on this Mac"** — a shared string
+  that renders verbatim in Windows UI.
 
 ### A cross-platform question this raises
 

@@ -81,6 +81,29 @@ and compare it with the `.sha256` published alongside the DMG.
 Drag the app to the Trash, or run `./scripts/uninstall.sh` from a clone to also remove
 preferences, Keychain tokens and the permission grants.
 
+### On Windows
+
+Windows 10 1809 or later, Microsoft Teams (the new client), and a player that appears in
+the Windows media flyout — Spotify does.
+
+1. Download `Teams-Music-Status-<version>-win-<arch>.zip` from the
+   [latest release](https://github.com/ZanderDent/teams_music_status/releases/latest)
+   and unzip it.
+2. Run `Install.ps1` inside the folder, or just run `TeamsMusicStatus.exe` where it is —
+   it needs no install. It appears in the notification area as ♪, with no window.
+3. A setup window offers to start syncing and to launch at sign-in.
+
+Installing is per-user and needs no administrator rights. It registers in **Settings ▸
+Apps ▸ Installed apps**, so removing it is the same as any other application — or run
+`Uninstall.ps1`, adding `-Purge` to drop settings and logs too.
+
+There is no permission prompt to grant: Windows exposes both the media session and the
+accessibility tree without one. Builds are not code-signed, so SmartScreen warns the first
+time — choose **More info ▸ Run anyway**, or build from source.
+
+Everything Windows-specific, including what the build measures and what is not done yet,
+is in [`docs/WINDOWS.md`](docs/WINDOWS.md).
+
 ---
 
 ## Building from source
@@ -303,11 +326,13 @@ the core.
   player or another computer is invisible to it, and it reports the primary artist only.
   The optional Web API source sees everything, but Spotify will only serve it to five
   hand-allowlisted accounts — see [Choosing a music source](#choosing-a-music-source).
-* **The Windows build has no application yet.** The Teams automation and the Spotify
-  source both work on Windows and pass the acceptance gate, including background updates
-  without focus theft — which `docs/FEASIBILITY.md` §13 warned might not be achievable
-  there. What is missing is everything around them: there is no tray application, only the
-  `tmswinctl` diagnostics CLI. See [`docs/WINDOWS.md`](docs/WINDOWS.md).
+* **The Windows build is local-source only.** Everything else works — a notification-area
+  app with onboarding, settings, a per-user installer, and background updates without focus
+  theft, which `docs/FEASIBILITY.md` §13 warned might not be achievable there. What is
+  missing is the Spotify Web API source, which needs CryptoKit and Network.framework
+  equivalents; the local media-session source needs no sign-in and reports *more* than the
+  macOS one. Windows builds are also not code-signed, so SmartScreen warns on first run.
+  See [`docs/WINDOWS.md`](docs/WINDOWS.md).
 * **"Show when people message me" cannot be set reliably.** Teams exposes the checkbox
   but not its checked state (`AXValue` is always empty), so the app refuses to toggle it
   blind rather than risk turning your setting off. Tick it once in Teams by hand.

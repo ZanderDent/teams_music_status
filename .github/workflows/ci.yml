@@ -218,8 +218,21 @@ jobs:
           # to the code that avoids them, and a check that fires on its own rationale is
           # one people learn to ignore.
           if git grep -nE 'SetFocus|ExpandCollapsePattern|SW_RESTORE' \
-               -- Sources/TeamsMusicStatusWindows \
+               -- Sources/TeamsMusicStatusWindows Sources/TeamsMusicStatusWin \
                | grep -vE ':[0-9]+:[[:space:]]*(///|//|\*)' ; then
             echo "::error::this activates Teams; use MSAA accDoDefaultAction and SW_SHOWNOACTIVATE"
             exit 1
           fi
+
+      - name: Windows install scripts must close the app, not kill it
+        # The shutdown path is what restores the status the user had before syncing. A
+        # force-kill skips it and strands whatever track was showing, so Stop-Process is
+        # only permissible as a fallback after a graceful close has been attempted.
+        run: |
+          set -euo pipefail
+          for script in scripts/windows-install/Install.ps1 scripts/windows-install/Uninstall.ps1 ; do
+            if grep -q 'Stop-Process' "$script" && ! grep -q 'WM_CLOSE\|0x0010' "$script" ; then
+              echo "::error file=$script::kills the app without asking it to close first"
+              exit 1
+            fi
+          done
