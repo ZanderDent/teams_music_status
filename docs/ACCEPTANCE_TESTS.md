@@ -56,6 +56,29 @@ with any `focus✗` is a failure even if the status was written.
 
 Omit `--with-restart` to skip case 5 (the disruptive one).
 
+### On Windows
+
+```powershell
+.\.build\debug\tmswinctl.exe gate
+```
+
+Same contract — writes several statuses, restores the original at the end, and fails the
+run if anything stole the foreground. The matrix is shorter:
+
+| # | Case | Passes when |
+|---|---|---|
+| 0 | Selector self-test | every required selector resolves |
+| 1 | Teams open, backgrounded | status written and read back identical |
+| 2 | Consecutive update | a second write lands |
+| 3 | Teams minimized | recovers and writes |
+| 4 | Sanitized unicode | astral scalars substituted, then written and read back |
+| 5 | Restore original status | Teams shows the original again |
+
+Cases 4 and 5 of the macOS matrix — *window closed* and *quit and relaunched* — are **not**
+covered on Windows. Both are reported as unrecoverable rather than repaired, because
+relaunching Teams is a visible action the app should not take unasked. See
+[`WINDOWS.md` §12](WINDOWS.md#12-what-is-not-done-yet).
+
 ---
 
 ## B. Application lifecycle

@@ -11,6 +11,19 @@ swift build && swift test                 # no Teams or Spotify needed
 ./scripts/build-app.sh --run              # build and launch the real app
 ```
 
+### On Windows
+
+The Windows build shares `TeamsMusicStatusCore` with macOS and adds its own target and
+presence source. Setup, the measured findings behind the design, and what is not done yet
+are in [`docs/WINDOWS.md`](docs/WINDOWS.md).
+
+```powershell
+winget install Microsoft.VisualStudio.2022.BuildTools   # MSVC + Windows SDK
+winget install Swift.Toolchain
+# then import the MSVC environment and restore SDKROOT — see docs/WINDOWS.md §10
+swift build && swift test
+```
+
 ## Ground rules
 
 **No screen coordinates. Ever.** No `AXPosition`, no `AXFrame`, no pixel matching, no
@@ -33,6 +46,20 @@ verifiers and client secrets must not reach a logger, not even at debug level. U
 **Keep Teams knowledge in one file.** Anything about how the Teams UI is shaped belongs
 in `TeamsSelectors`, with a matching entry in the self-test.
 
+### The same rules on Windows
+
+Every rule above holds; only the API names change. The Windows equivalents were arrived at
+by measurement, and in each case the *obvious* choice is the one that fails — see
+[`docs/WINDOWS.md`](docs/WINDOWS.md).
+
+| Rule | macOS | Windows |
+|---|---|---|
+| No screen coordinates | no `AXPosition`/`AXFrame`/`AXSize` | no `BoundingRectangle`, no `GetClickablePoint`, no `SendInput` at a point |
+| Success is never proof | `AXError.success` means nothing | neither does a UIA `HRESULT`. `ExpandCollapseState` reports `Collapsed` while the flyout is open, and `ValuePattern.SetValue` returns success without changing the field |
+| Never steal focus | `CGEvent.postToPid` | `PostMessage` to `Chrome_WidgetWin_1`. **Never** UIA `SetFocus` or `ExpandCollapsePattern.Expand` — both activate Teams |
+| Activation | `AXActivator.activate(_:expecting:)` | MSAA `accDoDefaultAction`, navigated from `AccessibleObjectFromWindow`. UIA's `LegacyIAccessible` bridge does not work |
+| Teams knowledge in one file | `TeamsSelectors` | the *same* `TeamsSelectors` — it is shared, not duplicated |
+
 ## How changes get merged
 
 `main` is protected. Nobody pushes to it directly, including the maintainer's own work
@@ -53,10 +80,19 @@ swift run tmsctl selftest               # selectors still resolve
 swift run tmsctl gate                   # Teams automation still works end to end
 ```
 
+On Windows the same three checks, through the Windows harness:
+
+```powershell
+swift test                                     # unit tests must pass
+.\.build\debug\tmswinctl.exe teams-selectors   # selectors still resolve
+.\.build\debug\tmswinctl.exe gate              # Teams automation still works end to end
+```
+
 Include in the description:
 
-* the macOS and Teams versions you tested on;
-* the `tmsctl gate` result line;
+* the macOS (or Windows) and Teams versions you tested on;
+* the `tmsctl gate` — or `tmswinctl gate` — result line, including whether focus was
+  preserved;
 * which sections of `docs/ACCEPTANCE_TESTS.md` you ran, if you touched sync behaviour.
 
 ## Reporting a bug

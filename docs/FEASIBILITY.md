@@ -588,6 +588,11 @@ Ranked by how much they worry me.
 
 ## 13. Windows-port considerations
 
+> **Answered.** These were written before any Windows spike. Most held; three did not,
+> including the one flagged as the biggest unknown — background updates without focus
+> theft *are* achievable. The measurements, and a point-by-point reckoning against the
+> predictions below, are in [`WINDOWS.md`](WINDOWS.md).
+
 * **The `PresenceTarget` abstraction is the right seam,** and the Spotify Web API source is
   fully portable — only the target and the local-app source are platform-specific.
 * **Windows Teams is also WebView2**, so the same "renderer accessibility is off until an AT
