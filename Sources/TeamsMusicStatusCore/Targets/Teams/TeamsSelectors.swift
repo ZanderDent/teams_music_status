@@ -153,9 +153,14 @@ public enum TeamsSelectors {
     /// Title carries the current choice as a suffix, e.g. `"Clear status message after Never"`.
     public static let clearAfterPopup = AXSelector(
         name: "clearAfterPopup",
-        describedAs: #"AXPopUpButton whose AXTitle starts "Clear status message after""#
+        describedAs: #"AXPopUpButton or AXButton whose AXTitle starts "Clear status message after""#
     ) { element in
-        element.role == "AXPopUpButton"
+        // macOS models this as a pop-up button. Windows UI Automation reports the same
+        // control as a plain Button carrying an ExpandCollapse pattern. Accept either,
+        // rather than teaching the Windows element type to report a role it does not have
+        // — that would also change how the avatar button identifies itself, and
+        // `profileButton` requires AXButton.
+        (element.role == "AXPopUpButton" || element.role == "AXButton")
             && element.title?.hasPrefix("Clear status message after") == true
     }
 

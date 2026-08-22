@@ -17,6 +17,9 @@ struct OnboardingView: View {
     @EnvironmentObject private var environment: AppEnvironment
     @StateObject private var model: OnboardingModel
     @State private var launchAtLogin = false
+    /// Guards the toggle's onChange so seeding the checkbox from `launchAtLoginIntent`
+    /// is not mistaken for the user choosing.
+    @State private var launchAtLoginSeeded = false
 
     var onFinish: () -> Void
 
@@ -45,7 +48,8 @@ struct OnboardingView: View {
         .frame(width: 560, height: 700)
         .onAppear {
             model.startPolling()
-            launchAtLogin = model.launchAtLoginEnabled
+            launchAtLogin = model.launchAtLoginIntent
+            DispatchQueue.main.async { launchAtLoginSeeded = true }
         }
         .onDisappear { model.stopPolling() }
     }
@@ -241,7 +245,10 @@ struct OnboardingView: View {
                 Toggle("Start Teams Music Status when I log in", isOn: $launchAtLogin)
                     .toggleStyle(.checkbox)
                     .controlSize(.small)
-                    .onChange(of: launchAtLogin) { _, newValue in model.setLaunchAtLogin(newValue) }
+                    .onChange(of: launchAtLogin) { _, newValue in
+                        guard launchAtLoginSeeded else { return }
+                        model.setLaunchAtLogin(newValue)
+                    }
                     .accessibilityLabel("Start Teams Music Status when I log in")
             }
 

@@ -45,6 +45,34 @@ func requirePermission() {
     }
 }
 
+// Commands that drive the Teams UI cannot safely run while the production app is doing
+// the same thing: `TeamsUI.exclusive` serialises callers inside one process, not across
+// processes, so two of them interleave halfway through a flyout and both fail. That is not
+// a hypothetical — it manufactured a four-minute "profile button did not respond"
+// stall during acceptance and contaminated the result.
+//
+// Read-only inspection (`health`, `audio`, `version`) is unaffected and stays available.
+let uiDrivingCommands: Set<String> = [
+    "get", "set", "clear", "selftest", "gate", "enable", "recover-window", "restart-teams",
+]
+if uiDrivingCommands.contains(command), !CommandLine.arguments.contains("--allow-contention") {
+    let running = NSWorkspace.shared.runningApplications.contains {
+        $0.bundleIdentifier == "com.zanderdent.TeamsMusicStatus"
+    }
+    if running {
+        FileHandle.standardError.write(Data("""
+        refusing to run '\(command)': Teams Music Status is running and drives the same
+        Teams UI. Two processes interleaving AX operations produce failures that belong to
+        neither of them.
+
+        Quit the app first (osascript -e 'quit app id "com.zanderdent.TeamsMusicStatus"'),
+        or pass --allow-contention if you are deliberately testing contention.
+
+        """.utf8))
+        exit(3)
+    }
+}
+
 switch command {
 
 case "version":
@@ -69,6 +97,52 @@ case "enable":
         print("FAILED: \(error.localizedDescription)")
         exit(1)
     }
+
+case "recover-window":
+    // The zero-window escalation, exercised deterministically. Prints the frontmost app
+    // before and after so focus restoration is verifiable rather than asserted.
+    requirePermission()
+    printHeader("Window recovery by activation")
+    let before = NSWorkspace.shared.frontmostApplication?.localizedName ?? "none"
+    print("health before: \(accessibility.health())")
+    print("frontmost before: \(before)")
+    let recovered = accessibility.activateToRestoreWindow()
+    Thread.sleep(forTimeInterval: 1.5)
+    let after = NSWorkspace.shared.frontmostApplication?.localizedName ?? "none"
+    print("recovered: \(recovered)")
+    print("health after: \(accessibility.health())")
+    print("frontmost after: \(after)")
+    print(before == after
+          ? "FOCUS RESTORED"
+          : "FOCUS NOT RESTORED (was \(before), now \(after))")
+    exit(recovered && before == after ? 0 : 1)
+
+case "restart-teams":
+    // The treeUnavailable escalation's actuator, on demand. Honours the same call-safety
+    // rule as the automatic path: it refuses while audio is being captured.
+    requirePermission()
+    printHeader("Controlled Teams restart")
+    if TeamsRestartRecovery.isAudioCaptureActive {
+        print("REFUSED: audio capture is active — a call may be in progress")
+        exit(2)
+    }
+    let outcome = await TeamsRestartRecovery.restartTeams()
+    print("outcome: \(outcome)")
+    let ok = outcome.isRelaunched
+    if ok {
+        target.handleTeamsRestart()
+        do {
+            try accessibility.ensureHealthy()
+            print("health after: \(accessibility.health())")
+        } catch {
+            print("health after: FAILED — \(error.localizedDescription)")
+            exit(1)
+        }
+    }
+    exit(ok ? 0 : 1)
+
+case "audio":
+    print("audioCaptureActive: \(TeamsRestartRecovery.isAudioCaptureActive)")
 
 case "selftest":
     requirePermission()

@@ -46,7 +46,12 @@ struct MenuBarContentView: View {
             header
             Divider().padding(.vertical, 8)
 
-            if let problem = environment.configurationProblem {
+            // Only the Web API needs a client ID. The local source reads the Spotify app
+            // over Apple Events and has no use for one, so showing this to a local-source
+            // user told them to go and register a developer app to fix nothing — on a
+            // build that deliberately ships without an ID, which is every public build.
+            // The sync toggle below was already source-aware; this was not.
+            if let problem = environment.configurationProblem, settings.sourceKind == .spotifyWebAPI {
                 calloutRow(icon: "gearshape.badge.xmark", tint: .orange, text: problem)
                 Divider().padding(.vertical, 8)
             }
@@ -210,7 +215,7 @@ struct MenuBarContentView: View {
             if environment.loginItem.isSupported {
                 Toggle("Launch at login", isOn: Binding(
                     get: { environment.loginItem.isEnabled },
-                    set: { environment.loginItem.setEnabled($0) }
+                    set: { environment.setLaunchAtLogin($0, userInitiated: true) }
                 ))
                 .toggleStyle(.checkbox)
                 .controlSize(.small)

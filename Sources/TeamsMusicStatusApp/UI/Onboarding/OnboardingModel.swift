@@ -269,11 +269,23 @@ final class OnboardingModel: ObservableObject {
     func finish(enableSync: Bool) {
         settings.hasCompletedOnboarding = true
         if enableSync { environment.coordinator.isEnabled = true }
+        // "Install once and forget it" is not achievable without this: an app that does
+        // not return after a reboot has to be noticed and restarted by hand. Only applies
+        // when the user never expressed a preference — an explicit choice is never
+        // overridden.
+        environment.enableLaunchAtLoginByDefault()
         stopPolling()
     }
 
+    /// User-initiated only. Records the choice so the default above can never undo it.
     func setLaunchAtLogin(_ enabled: Bool) {
-        environment.loginItem.setEnabled(enabled)
+        environment.setLaunchAtLogin(enabled, userInitiated: true)
+    }
+
+    /// What the checkbox should show before it is touched: a fresh install previews the
+    /// default it is about to get, an existing install shows what it actually has.
+    var launchAtLoginIntent: Bool {
+        settings.launchAtLoginChosenExplicitly ? environment.loginItem.isEnabled : true
     }
 
     var launchAtLoginEnabled: Bool { environment.loginItem.isEnabled }
